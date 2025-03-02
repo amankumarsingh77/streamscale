@@ -14,10 +14,11 @@ const (
 type VideoQuality string
 
 const (
-	Quality1080P VideoQuality = "1080p"
-	Quality720P  VideoQuality = "720p"
-	Quality480P  VideoQuality = "480p"
-	Quality360P  VideoQuality = "360p"
+	Quality1080P  VideoQuality = "1080p"
+	Quality720P   VideoQuality = "720p"
+	Quality480P   VideoQuality = "480p"
+	Quality360P   VideoQuality = "360p"
+	QualityMaster VideoQuality = "master" // Represents the adaptive master playlist
 )
 
 type InputQualityInfo struct {
@@ -53,6 +54,14 @@ type PlaybackInfo struct {
 }
 
 func (p *PlaybackInfo) GetPlaybackURL(format PlaybackFormat, quality VideoQuality) string {
+	// If master quality is requested or available, prioritize it for HLS
+	if format == FormatHLS && (quality == QualityMaster || quality == "") {
+		if masterInfo, ok := p.Qualities[QualityMaster]; ok {
+			return masterInfo.URLs.HLS
+		}
+	}
+
+	// Otherwise, return the specific quality requested
 	if qualityInfo, ok := p.Qualities[quality]; ok {
 		switch format {
 		case FormatHLS:
@@ -61,5 +70,13 @@ func (p *PlaybackInfo) GetPlaybackURL(format PlaybackFormat, quality VideoQualit
 			return qualityInfo.URLs.DASH
 		}
 	}
+
+	// If the specific quality is not available, try to return the master playlist for HLS
+	if format == FormatHLS {
+		if masterInfo, ok := p.Qualities[QualityMaster]; ok {
+			return masterInfo.URLs.HLS
+		}
+	}
+
 	return ""
 }

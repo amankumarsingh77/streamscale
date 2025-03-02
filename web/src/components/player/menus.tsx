@@ -14,6 +14,8 @@ import {
   RadioButtonIcon,
   RadioButtonSelectedIcon,
   SettingsIcon,
+  FullscreenIcon,
+  PlayIcon,
 } from "@vidstack/react/icons";
 
 import { buttonClass, tooltipClass } from "./buttons";
@@ -21,6 +23,11 @@ import { buttonClass, tooltipClass } from "./buttons";
 export interface SettingsProps {
   placement: MenuPlacement;
   tooltipPlacement: TooltipPlacement;
+  qualities?: string[];
+  selectedQuality?: string;
+  onQualityChange?: (quality: string) => void;
+  playbackSpeed?: number;
+  onPlaybackSpeedChange?: (speed: number) => void;
 }
 
 export const menuClass =
@@ -29,7 +36,15 @@ export const menuClass =
 export const submenuClass =
   "hidden w-full flex-col items-start justify-center outline-none data-[keyboard]:mt-[3px] data-[open]:inline-block";
 
-export function Settings({ placement, tooltipPlacement }: SettingsProps) {
+export function Settings({ 
+  placement, 
+  tooltipPlacement,
+  qualities = [],
+  selectedQuality = 'auto',
+  onQualityChange,
+  playbackSpeed = 1,
+  onPlaybackSpeedChange
+}: SettingsProps) {
   return (
     <Menu.Root className="parent">
       <Tooltip.Root>
@@ -44,6 +59,17 @@ export function Settings({ placement, tooltipPlacement }: SettingsProps) {
       </Tooltip.Root>
       <Menu.Content className={menuClass} placement={placement}>
         <CaptionSubmenu />
+        {qualities.length > 0 && (
+          <QualitySubmenu 
+            qualities={qualities} 
+            selectedQuality={selectedQuality} 
+            onQualityChange={onQualityChange} 
+          />
+        )}
+        <PlaybackSpeedSubmenu 
+          playbackSpeed={playbackSpeed} 
+          onPlaybackSpeedChange={onPlaybackSpeedChange} 
+        />
       </Menu.Content>
     </Menu.Root>
   );
@@ -58,7 +84,7 @@ function CaptionSubmenu() {
         label="Captions"
         hint={hint}
         disabled={options.disabled}
-        icon={ClosedCaptionsIcon}
+        icon={<ClosedCaptionsIcon className="w-5 h-5" />}
       />
       <Menu.Content className={submenuClass}>
         <Menu.RadioGroup
@@ -68,6 +94,79 @@ function CaptionSubmenu() {
           {options.map(({ label, value, select }) => (
             <Radio value={value} onSelect={select} key={value}>
               {label}
+            </Radio>
+          ))}
+        </Menu.RadioGroup>
+      </Menu.Content>
+    </Menu.Root>
+  );
+}
+
+function QualitySubmenu({ 
+  qualities, 
+  selectedQuality = 'auto', 
+  onQualityChange 
+}: { 
+  qualities: string[], 
+  selectedQuality?: string, 
+  onQualityChange?: (quality: string) => void 
+}) {
+  return (
+    <Menu.Root>
+      <SubmenuButton
+        label="Quality"
+        hint={selectedQuality}
+        icon={<SettingsIcon className="w-5 h-5" />}
+      />
+      <Menu.Content className={submenuClass}>
+        <Menu.RadioGroup
+          className="w-full flex flex-col"
+          value={selectedQuality}
+        >
+          {qualities.map((quality) => (
+            <Radio 
+              value={quality} 
+              onSelect={() => onQualityChange?.(quality)} 
+              key={quality}
+            >
+              {quality}
+            </Radio>
+          ))}
+        </Menu.RadioGroup>
+      </Menu.Content>
+    </Menu.Root>
+  );
+}
+
+function PlaybackSpeedSubmenu({ 
+  playbackSpeed = 1, 
+  onPlaybackSpeedChange 
+}: { 
+  playbackSpeed?: number, 
+  onPlaybackSpeedChange?: (speed: number) => void 
+}) {
+  const speeds = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+  const formatSpeed = (speed: number) => speed === 1 ? 'Normal' : `${speed}x`;
+  
+  return (
+    <Menu.Root>
+      <SubmenuButton
+        label="Playback Speed"
+        hint={formatSpeed(playbackSpeed)}
+        icon={<PlayIcon className="w-5 h-5" />}
+      />
+      <Menu.Content className={submenuClass}>
+        <Menu.RadioGroup
+          className="w-full flex flex-col"
+          value={playbackSpeed.toString()}
+        >
+          {speeds.map((speed) => (
+            <Radio 
+              value={speed.toString()} 
+              onSelect={() => onPlaybackSpeedChange?.(speed)} 
+              key={speed}
+            >
+              {formatSpeed(speed)}
             </Radio>
           ))}
         </Menu.RadioGroup>
@@ -111,7 +210,7 @@ function SubmenuButton({
     >
       <ChevronLeftIcon className="parent-data-[open]:block -ml-0.5 mr-1.5 hidden h-[18px] w-[18px]" />
       <div className="contents parent-data-[open]:hidden">
-        <Icon className="w-5 h-5" />
+        {Icon}
       </div>
       <span className="ml-1.5 parent-data-[open]:ml-0">{label}</span>
       <span className="ml-auto text-sm text-white/50">{hint}</span>

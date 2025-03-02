@@ -15,6 +15,8 @@ type stitchAndPackageOptions struct {
 	withDASH        bool
 }
 
+// This function is kept for backward compatibility but is no longer used
+// in the multi-quality implementation
 func (p *videoProcessor) stitchAndPackage(segments []string, outputPath string) error {
 	// Create temporary directory for packaged output
 	packagingDir := filepath.Join(p.tempDir, "packaging")
@@ -42,53 +44,16 @@ func (p *videoProcessor) stitchAndPackage(segments []string, outputPath string) 
 		withDASH:        true,
 	}
 
-	if err := p.packageVideo(fragmentedPath, outputPath, opts); err != nil {
+	if err := p.packageVideo([]string{fragmentedPath}, outputPath, opts); err != nil {
 		return fmt.Errorf("failed to package video: %w", err)
 	}
 
 	return nil
 }
 
+// stitchSegments is kept for backward compatibility
 func (p *videoProcessor) stitchSegments(segments []string, outputPath string) error {
-	// Create concat file
-	concatListPath := filepath.Join(p.tempDir, "concat_list.txt")
-	concatFile, err := os.Create(concatListPath)
-	if err != nil {
-		return fmt.Errorf("failed to create concat list: %w", err)
-	}
-	defer os.Remove(concatListPath)
-	defer concatFile.Close()
-
-	// Write segment paths to concat file
-	for _, segment := range segments {
-		absPath, err := filepath.Abs(segment)
-		if err != nil {
-			return fmt.Errorf("failed to get absolute path for segment: %w", err)
-		}
-		if _, err := fmt.Fprintf(concatFile, "file '%s'\n", absPath); err != nil {
-			return fmt.Errorf("failed to write to concat list: %w", err)
-		}
-	}
-	concatFile.Close() // Close before using in ffmpeg
-
-	// Run ffmpeg concat
-	cmd := exec.Command("ffmpeg",
-		"-f", "concat",
-		"-safe", "0",
-		"-i", concatListPath,
-		"-c", "copy",
-		"-movflags", "+faststart",
-		"-y", outputPath,
-	)
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("ffmpeg concat failed: %v, stderr: %s", err, stderr.String())
-	}
-
-	return nil
+	return p.stitchSegmentsToFile(segments, outputPath)
 }
 
 func (p *videoProcessor) fragmentVideo(inputPath, outputPath string) error {
@@ -109,7 +74,7 @@ func (p *videoProcessor) fragmentVideo(inputPath, outputPath string) error {
 	return nil
 }
 
-func (p *videoProcessor) packageVideo(inputPath, outputPath string, opts stitchAndPackageOptions) error {
+func (p *videoProcessor) packageVideo(inputPaths []string, outputPath string, opts stitchAndPackageOptions) error {
 	args := []string{
 		"--output-dir", outputPath,
 		"--force",
@@ -119,12 +84,14 @@ func (p *videoProcessor) packageVideo(inputPath, outputPath string, opts stitchA
 	if opts.withHLS {
 		args = append(args, "--hls")
 	}
-	//if opts.withDASH {
-	//	args = append(args, "--mpd")
-	//}
+	// if opts.withDASH {
+	// 	args = append(args, "--mpd")
+	// }
 
 	// Add input file
-	args = append(args, inputPath)
+	for _, inputPath := range inputPaths {
+		args = append(args, inputPath)
+	}
 
 	cmd := exec.Command("mp4dash", args...)
 
@@ -136,9 +103,9 @@ func (p *videoProcessor) packageVideo(inputPath, outputPath string, opts stitchA
 	}
 
 	// Verify output
-	//if err := p.verifyPackagedOutput(outputPath); err != nil {
-	//	return fmt.Errorf("package verification failed: %w", err)
-	//}
+	// if err := p.verifyPackagedOutput(outputPath); err != nil {
+	// 	return fmt.Errorf("package verification failed: %w", err)
+	// }
 
 	return nil
 }
@@ -146,7 +113,6 @@ func (p *videoProcessor) packageVideo(inputPath, outputPath string, opts stitchA
 func (p *videoProcessor) verifyPackagedOutput(outputPath string) error {
 	// Check for essential files
 	requiredFiles := []string{
-		"stream.mpd",  // DASH manifest
 		"master.m3u8", // HLS master playlist
 	}
 
@@ -158,13 +124,17 @@ func (p *videoProcessor) verifyPackagedOutput(outputPath string) error {
 	}
 
 	// Check for segment files
-	segmentFiles, err := filepath.Glob(filepath.Join(outputPath, "chunk-*.m4s"))
+	segmentFiles, err := filepath.Glob(filepath.Join(outputPath, "*.ts"))
 	if err != nil {
 		return fmt.Errorf("failed to check for segment files: %w", err)
 	}
 
 	if len(segmentFiles) == 0 {
-		return fmt.Errorf("no segment files found in output")
+		// Try looking for DASH segments if no HLS segments found
+		dashSegments, err := filepath.Glob(filepath.Join(outputPath, "*.m4s"))
+		if err != nil || len(dashSegments) == 0 {
+			return fmt.Errorf("no segment files found in output")
+		}
 	}
 
 	return nil

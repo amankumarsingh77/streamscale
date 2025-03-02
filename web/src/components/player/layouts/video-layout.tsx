@@ -11,9 +11,21 @@ import { Title } from '../title';
 
 export interface VideoLayoutProps {
   thumbnails?: string;
+  qualities?: string[];
+  selectedQuality?: string;
+  onQualityChange?: (quality: string) => void;
+  playbackSpeed?: number;
+  onPlaybackSpeedChange?: (speed: number) => void;
 }
 
-export function VideoLayout({ thumbnails }: VideoLayoutProps) {
+export function VideoLayout({ 
+  thumbnails,
+  qualities = [],
+  selectedQuality = 'auto',
+  onQualityChange,
+  playbackSpeed = 1,
+  onPlaybackSpeedChange
+}: VideoLayoutProps) {
   return (
     <>
       <Gestures />
@@ -35,7 +47,15 @@ export function VideoLayout({ thumbnails }: VideoLayoutProps) {
           <Title />
           <div className="flex-1" />
           <Buttons.Caption tooltipPlacement="top" />
-          <Menus.Settings placement="top end" tooltipPlacement="top" />
+          <Menus.Settings 
+            placement="top end" 
+            tooltipPlacement="top"
+            qualities={qualities}
+            selectedQuality={selectedQuality}
+            onQualityChange={onQualityChange}
+            playbackSpeed={playbackSpeed}
+            onPlaybackSpeedChange={onPlaybackSpeedChange}
+          />
           <Buttons.PIP tooltipPlacement="top" />
           <Buttons.Fullscreen tooltipPlacement="top end" />
         </Controls.Group>

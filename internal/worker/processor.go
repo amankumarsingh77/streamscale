@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	maxConcurrentUploads = 50
+	maxConcurrentUploads = 2
 )
 
 type videoProcessor struct {
@@ -53,8 +53,23 @@ type ProcessingResult struct {
 	Qualities []models.InputQualityInfo
 }
 
-func (p *videoProcessor) ProcessVideo(ctx context.Context, inputKey, outputKey string, videoID uuid.UUID) (*ProcessingResult, error) {
-	if inputKey == "" || outputKey == "" {
+// Define quality presets
+type QualityPreset struct {
+	Name       models.VideoQuality
+	Resolution [2]int // [width, height]
+	Bitrate    int    // in kbps
+}
+
+// Quality presets for different resolutions
+var qualityPresets = []QualityPreset{
+	{Name: models.Quality1080P, Resolution: [2]int{1920, 1080}, Bitrate: 4500},
+	{Name: models.Quality720P, Resolution: [2]int{1280, 720}, Bitrate: 2500},
+	{Name: models.Quality480P, Resolution: [2]int{854, 480}, Bitrate: 1000},
+	{Name: models.Quality360P, Resolution: [2]int{640, 360}, Bitrate: 600},
+}
+
+func (p *videoProcessor) ProcessVideo(ctx context.Context, job *models.EncodeJob, videoID uuid.UUID) (*ProcessingResult, error) {
+	if job.InputS3Key == "" || job.OutputS3Key == "" {
 		return nil, fmt.Errorf("input key and output key cannot be empty")
 	}
 
@@ -64,12 +79,12 @@ func (p *videoProcessor) ProcessVideo(ctx context.Context, inputKey, outputKey s
 		return nil, fmt.Errorf("failed to create temp directory: %w", err)
 	}
 
-	localPath, err := p.downloadVideo(ctx, inputKey)
+	localPath, err := p.downloadVideo(ctx, job.InputS3Key)
 	if err != nil {
 		return nil, fmt.Errorf("download failed: %w", err)
 	}
-	// Update progress after download (20%)
-	if err := p.videoRepo.UpdateVideoProgress(ctx, videoID, models.JobStatusProcessing, 20); err != nil {
+	// Update progress after download (10%)
+	if err := p.videoRepo.UpdateVideoProgress(ctx, videoID, models.JobStatusProcessing, 10); err != nil {
 		p.logger.Errorf("Failed to update progress after download: %v", err)
 	}
 
@@ -77,8 +92,8 @@ func (p *videoProcessor) ProcessVideo(ctx context.Context, inputKey, outputKey s
 	if err != nil {
 		return nil, fmt.Errorf("video info extraction failed: %w", err)
 	}
-	// Update progress after video info extraction (40%)
-	if err := p.videoRepo.UpdateVideoProgress(ctx, videoID, models.JobStatusProcessing, 40); err != nil {
+	// Update progress after video info extraction (20%)
+	if err := p.videoRepo.UpdateVideoProgress(ctx, videoID, models.JobStatusProcessing, 20); err != nil {
 		p.logger.Errorf("Failed to update progress after info extraction: %v", err)
 	}
 
@@ -86,31 +101,61 @@ func (p *videoProcessor) ProcessVideo(ctx context.Context, inputKey, outputKey s
 	if err != nil {
 		return nil, fmt.Errorf("split failed: %w", err)
 	}
-	// Update progress after video splitting (60%)
-	if err := p.videoRepo.UpdateVideoProgress(ctx, videoID, models.JobStatusProcessing, 60); err != nil {
+	// Update progress after video splitting (30%)
+	if err := p.videoRepo.UpdateVideoProgress(ctx, videoID, models.JobStatusProcessing, 30); err != nil {
 		p.logger.Errorf("Failed to update progress after splitting: %v", err)
 	}
 
-	bitrate, err := p.analyzeBitrate(segments[0], videoInfo)
-	if err != nil {
-		return nil, fmt.Errorf("bitrate analysis failed: %w", err)
+	// Determine which quality presets to use based on source video
+	applicablePresets := p.determineApplicablePresets(videoInfo)
+
+	// Create a map to store encoded segments for each quality
+	qualitySegments := make(map[models.VideoQuality][]string)
+	qualityInfos := make([]models.InputQualityInfo, 0, len(applicablePresets))
+
+	// Process each quality preset
+	for i, preset := range applicablePresets {
+		p.logger.Infof("Encoding for quality: %s", preset.Name)
+
+		// Calculate progress increment for each quality (50% of total progress divided by number of qualities)
+		progressIncrement := 50.0 / float64(len(applicablePresets))
+		currentProgress := 30.0 + float64(i)*progressIncrement
+
+		// Update progress at the start of each quality encoding
+		if err := p.videoRepo.UpdateVideoProgress(ctx, videoID, models.JobStatusProcessing, float64(int(currentProgress))); err != nil {
+			p.logger.Errorf("Failed to update progress for quality %s: %v", preset.Name, err)
+		}
+
+		// Encode segments for this quality
+		encodedSegments, err := p.encodeSegmentsWithQuality(segments, preset, videoInfo)
+		if err != nil {
+			return nil, fmt.Errorf("encoding failed for quality %s: %w", preset.Name, err)
+		}
+
+		qualitySegments[preset.Name] = encodedSegments
+
+		// Add quality info to result
+		qualityInfos = append(qualityInfos, models.InputQualityInfo{
+			Resolution: fmt.Sprintf("%dx%d", preset.Resolution[0], preset.Resolution[1]),
+			Bitrate:    preset.Bitrate,
+			MaxBitrate: int(float64(preset.Bitrate) * 1.5),
+			MinBitrate: int(float64(preset.Bitrate) * 0.5),
+		})
+
+		// Update progress after encoding this quality
+		if err := p.videoRepo.UpdateVideoProgress(ctx, videoID, models.JobStatusProcessing, float64(int(currentProgress+progressIncrement))); err != nil {
+			p.logger.Errorf("Failed to update progress after encoding quality %s: %v", preset.Name, err)
+		}
 	}
 
-	encodedSegments, err := p.encodeSegments(segments, bitrate)
-	if err != nil {
-		return nil, fmt.Errorf("encoding failed: %w", err)
-	}
-	// Update progress after encoding (80%)
-	if err := p.videoRepo.UpdateVideoProgress(ctx, videoID, models.JobStatusProcessing, 80); err != nil {
-		p.logger.Errorf("Failed to update progress after encoding: %v", err)
-	}
-
+	// Create output directory
 	outputPath := filepath.Join(p.tempDir, "output")
 	if err := os.MkdirAll(outputPath, os.ModePerm); err != nil {
 		return nil, fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	if err := p.stitchAndPackage(encodedSegments, outputPath); err != nil {
+	// Package all qualities
+	if err := p.stitchAndPackageMultiQuality(qualitySegments, outputPath); err != nil {
 		return nil, fmt.Errorf("finalization failed: %w", err)
 	}
 
@@ -118,24 +163,175 @@ func (p *videoProcessor) ProcessVideo(ctx context.Context, inputKey, outputKey s
 		return nil, fmt.Errorf("output directory does not exist after processing")
 	}
 
-	outputKey = strings.TrimPrefix(outputKey, "/")
+	outputKey := strings.TrimPrefix(job.OutputS3Key, "/")
 	outputKey = strings.TrimSuffix(outputKey, "/")
 
+	// Upload all processed files
 	if err := p.uploadProcessedFiles(ctx, outputPath, outputKey); err != nil {
 		return nil, fmt.Errorf("upload failed: %w", err)
 	}
+
 	// Update progress after upload (90%)
 	if err := p.videoRepo.UpdateVideoProgress(ctx, videoID, models.JobStatusProcessing, 90); err != nil {
 		p.logger.Errorf("Failed to update progress after upload: %v", err)
 	}
 
 	result := &ProcessingResult{
-		Duration: videoInfo.Duration,
-		Width:    videoInfo.Width,
-		Height:   videoInfo.Height,
+		Duration:  videoInfo.Duration,
+		Width:     videoInfo.Width,
+		Height:    videoInfo.Height,
+		Qualities: qualityInfos,
 	}
 
 	return result, nil
+}
+
+// determineApplicablePresets determines which quality presets are applicable for the source video
+func (p *videoProcessor) determineApplicablePresets(videoInfo *VideoInfo) []QualityPreset {
+	var applicablePresets []QualityPreset
+
+	// Get source resolution
+	sourceWidth := videoInfo.Width
+	sourceHeight := videoInfo.Height
+
+	// Only include presets with resolution less than or equal to source
+	for _, preset := range qualityPresets {
+		if preset.Resolution[0] <= sourceWidth && preset.Resolution[1] <= sourceHeight {
+			applicablePresets = append(applicablePresets, preset)
+		}
+	}
+
+	// If no applicable presets (unlikely), use the lowest quality
+	if len(applicablePresets) == 0 {
+		applicablePresets = append(applicablePresets, qualityPresets[len(qualityPresets)-1])
+	}
+
+	return applicablePresets
+}
+
+// encodeSegmentsWithQuality encodes segments with specific quality settings
+func (p *videoProcessor) encodeSegmentsWithQuality(segments []string, preset QualityPreset, videoInfo *VideoInfo) ([]string, error) {
+	type encodeResult struct {
+		index int
+		path  string
+		err   error
+	}
+
+	resultChan := make(chan encodeResult, len(segments))
+	sem := make(chan struct{}, MaxParallelJobs)
+	var wg sync.WaitGroup
+
+	// Create quality-specific output directory
+	qualityDir := filepath.Join(p.tempDir, "encoded_segments", string(preset.Name))
+	if err := os.MkdirAll(qualityDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create output directory for quality %s: %w", preset.Name, err)
+	}
+
+	for i, segment := range segments {
+		wg.Add(1)
+		go func(idx int, inputPath string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			outputPath := filepath.Join(qualityDir, fmt.Sprintf("encoded_%03d.mp4", idx))
+			err := p.encodeSingleSegmentWithQuality(inputPath, outputPath, preset)
+
+			resultChan <- encodeResult{
+				index: idx,
+				path:  outputPath,
+				err:   err,
+			}
+		}(i, segment)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	encodedSegments := make([]string, len(segments))
+	for result := range resultChan {
+		if result.err != nil {
+			return nil, fmt.Errorf("segment %d encoding failed: %w", result.index, result.err)
+		}
+		encodedSegments[result.index] = result.path
+	}
+
+	return encodedSegments, nil
+}
+
+// encodeSingleSegmentWithQuality encodes a single segment with specific quality settings
+func (p *videoProcessor) encodeSingleSegmentWithQuality(inputPath, outputPath string, preset QualityPreset) error {
+	// Use SVT-AV1 encoding as requested
+	return p.encodeSingleSegmentWithSVTAV1(inputPath, outputPath, preset)
+}
+
+// encodeSingleSegmentWithH264 encodes with H.264
+// Keep this method for future reference but it's not used currently
+func (p *videoProcessor) encodeSingleSegmentWithH264(inputPath, outputPath string, preset QualityPreset) error {
+	// Create ffmpeg command with H.264 parameters
+	cmd := exec.Command("ffmpeg",
+		"-i", inputPath,
+		"-c:v", "libx264",
+		"-preset", "medium", // Balance between speed and quality
+		"-profile:v", "high",
+		"-level", "4.1",
+		"-vf", fmt.Sprintf("scale=%d:%d", preset.Resolution[0], preset.Resolution[1]),
+		// Set bitrate parameters
+		"-b:v", fmt.Sprintf("%dk", preset.Bitrate),
+		"-maxrate", fmt.Sprintf("%dk", int(float64(preset.Bitrate)*1.5)),
+		"-bufsize", fmt.Sprintf("%dk", preset.Bitrate*2),
+		// Add keyframe interval for better seeking
+		"-g", "48",
+		// Add faststart for web streaming
+		"-movflags", "+faststart",
+		// Audio settings
+		"-c:a", "aac",
+		"-b:a", "128k",
+		"-y", outputPath,
+	)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("H.264 encoding failed: %v, stderr: %s", err, stderr.String())
+	}
+
+	return nil
+}
+
+// encodeSingleSegmentWithSVTAV1 encodes with SVT-AV1
+func (p *videoProcessor) encodeSingleSegmentWithSVTAV1(inputPath, outputPath string, preset QualityPreset) error {
+	// Create ffmpeg command with SVT-AV1 parameters
+	cmd := exec.Command("ffmpeg",
+		"-i", inputPath,
+		"-c:v", "libsvtav1",
+		"-preset", "7", // Balance between speed and quality (0-13, lower is better quality)
+		"-vf", fmt.Sprintf("scale=%d:%d", preset.Resolution[0], preset.Resolution[1]),
+		// Use CRF mode with target bitrate as maxrate (required by SVT-AV1)
+		"-crf", "30",
+		"-maxrate", fmt.Sprintf("%dk", int(float64(preset.Bitrate)*1.5)),
+		"-bufsize", fmt.Sprintf("%dk", preset.Bitrate*2),
+		// Add keyframe interval for better seeking
+		"-g", "240",
+		// Add faststart for web streaming
+		"-movflags", "+faststart",
+		// Audio settings
+		"-c:a", "aac",
+		"-b:a", "128k",
+		"-y", outputPath,
+	)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("SVT-AV1 encoding failed: %v, stderr: %s", err, stderr.String())
+	}
+
+	return nil
 }
 
 func (p *videoProcessor) uploadProcessedFiles(ctx context.Context, outputPath, outputKey string) error {
@@ -178,48 +374,8 @@ func (p *videoProcessor) uploadProcessedFiles(ctx context.Context, outputPath, o
 	}
 
 	go func() {
-		// Upload all files from tmp_segments directory
-		err := filepath.Walk(p.tempDir, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-
-			if info.IsDir() {
-				return nil
-			}
-
-			// Get the relative path from tempDir
-			relPath, err := filepath.Rel(p.tempDir, path)
-			if err != nil {
-				return fmt.Errorf("failed to get relative path: %w", err)
-			}
-
-			relPath = filepath.ToSlash(relPath)
-			s3Key := fmt.Sprintf("%s/processing/%s", baseKey, relPath)
-			s3Key = strings.TrimPrefix(s3Key, "/")
-
-			select {
-			case jobs <- uploadJob{
-				path:     path,
-				relPath:  relPath,
-				s3Key:    s3Key,
-				fileInfo: info,
-			}:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-			return nil
-		})
-
-		if err != nil {
-			select {
-			case results <- fmt.Errorf("failed to walk temp directory: %w", err):
-			case <-ctx.Done():
-			}
-		}
-
-		// Upload HLS/DASH files from outputPath
-		err = filepath.Walk(outputPath, func(path string, info os.FileInfo, err error) error {
+		// Only upload files from the outputPath
+		err := filepath.Walk(outputPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
@@ -410,18 +566,159 @@ func (p *videoProcessor) splitVideo(inputPath string, videoInfo *VideoInfo) ([]s
 	return segments, nil
 }
 
-func (p *videoProcessor) encodeSingleSegment(inputPath, outputPath string, bitrate int) error {
+func (p *videoProcessor) stitchAndPackageMultiQuality(qualitySegments map[models.VideoQuality][]string, outputPath string) error {
+	// Create temporary directory for packaged output
+	packagingDir := filepath.Join(p.tempDir, "packaging")
+	if err := os.MkdirAll(packagingDir, 0755); err != nil {
+		return fmt.Errorf("failed to create packaging directory: %w", err)
+	}
+
+	// Create quality-specific output directories
+	fragmentPaths := []string{}
+	for quality, segments := range qualitySegments {
+		qualityOutputPath := filepath.Join(outputPath, string(quality))
+		if err := os.MkdirAll(qualityOutputPath, 0755); err != nil {
+			return fmt.Errorf("failed to create output directory for quality %s: %w", quality, err)
+		}
+
+		// Stitch segments for this quality
+		stitchedPath := filepath.Join(packagingDir, fmt.Sprintf("stitched_%s.mp4", quality))
+		if err := p.stitchSegmentsToFile(segments, stitchedPath); err != nil {
+			return fmt.Errorf("failed to stitch segments for quality %s: %w", quality, err)
+		}
+
+		// Fragment the stitched video
+		fragmentedPath := filepath.Join(packagingDir, fmt.Sprintf("fragmented_%s.mp4", quality))
+		if err := p.fragmentVideo(stitchedPath, fragmentedPath); err != nil {
+			return fmt.Errorf("failed to fragment video for quality %s: %w", quality, err)
+		}
+
+		fragmentPaths = append(fragmentPaths, fragmentedPath)
+
+		// Package the video with HLS/DASH
+		// opts := stitchAndPackageOptions{
+		// 	segmentDuration: 6,
+		// 	withHLS:         true,
+		// 	withDASH:        true,
+		// }
+
+		// if err := p.packageVideo(fragmentedPath, qualityOutputPath, opts); err != nil {
+		// 	return fmt.Errorf("failed to package video for quality %s: %w", quality, err)
+		// }
+	}
+
+	// Create a master playlist that references all quality variants
+	// if err := p.createMasterPlaylist(outputPath, qualitySegments); err != nil {
+	// 	return fmt.Errorf("failed to create master playlist: %w", err)
+	// }
+
+	opts := stitchAndPackageOptions{
+		segmentDuration: 6,
+		withHLS:         true,
+		withDASH:        true,
+	}
+
+	log.Println("fragmentPaths", fragmentPaths)
+
+	if err := p.packageVideo(fragmentPaths, outputPath, opts); err != nil {
+		return fmt.Errorf("failed to package video: %w", err)
+	}
+
+	return nil
+}
+
+// createMasterPlaylist creates a master HLS playlist that references all quality variants
+func (p *videoProcessor) createMasterPlaylist(outputPath string, qualitySegments map[models.VideoQuality][]string) error {
+	masterPlaylistPath := filepath.Join(outputPath, "master.m3u8")
+	file, err := os.Create(masterPlaylistPath)
+	if err != nil {
+		return fmt.Errorf("failed to create master playlist: %w", err)
+	}
+	defer file.Close()
+
+	// Write HLS header
+	if _, err := file.WriteString("#EXTM3U\n#EXT-X-VERSION:3\n"); err != nil {
+		return fmt.Errorf("failed to write to master playlist: %w", err)
+	}
+
+	// Add each quality variant in descending order of quality
+	qualityOrder := []models.VideoQuality{
+		models.Quality1080P,
+		models.Quality720P,
+		models.Quality480P,
+		models.Quality360P,
+	}
+
+	for _, quality := range qualityOrder {
+		if _, exists := qualitySegments[quality]; !exists {
+			continue // Skip qualities that don't exist in our segments
+		}
+
+		var bandwidth int
+		var resolution string
+
+		// Set bandwidth and resolution based on quality
+		switch quality {
+		case models.Quality1080P:
+			bandwidth = 4500000
+			resolution = "1920x1080"
+		case models.Quality720P:
+			bandwidth = 2500000
+			resolution = "1280x720"
+		case models.Quality480P:
+			bandwidth = 1000000
+			resolution = "854x480"
+		case models.Quality360P:
+			bandwidth = 600000
+			resolution = "640x360"
+		}
+
+		// Write stream info with additional attributes for better player compatibility
+		streamInfo := fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%s,CODECS=\"av01.0.08M.08.0.110.01.01.01.0,mp4a.40.2\",FRAME-RATE=30\n",
+			bandwidth, resolution)
+		if _, err := file.WriteString(streamInfo); err != nil {
+			return fmt.Errorf("failed to write stream info to master playlist: %w", err)
+		}
+
+		// Write path to variant playlist
+		variantPath := fmt.Sprintf("%s/master.m3u8\n", quality)
+		if _, err := file.WriteString(variantPath); err != nil {
+			return fmt.Errorf("failed to write variant path to master playlist: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (p *videoProcessor) stitchSegmentsToFile(segments []string, outputPath string) error {
+	// Create concat file
+	concatListPath := filepath.Join(p.tempDir, "concat_list.txt")
+	concatFile, err := os.Create(concatListPath)
+	if err != nil {
+		return fmt.Errorf("failed to create concat list: %w", err)
+	}
+	defer os.Remove(concatListPath)
+	defer concatFile.Close()
+
+	// Write segment paths to concat file
+	for _, segment := range segments {
+		absPath, err := filepath.Abs(segment)
+		if err != nil {
+			return fmt.Errorf("failed to get absolute path for segment: %w", err)
+		}
+		if _, err := fmt.Fprintf(concatFile, "file '%s'\n", absPath); err != nil {
+			return fmt.Errorf("failed to write to concat list: %w", err)
+		}
+	}
+	concatFile.Close()
+
+	// Run ffmpeg concat
 	cmd := exec.Command("ffmpeg",
-		"-i", inputPath,
-		"-c:v", "libsvtav1",
-		"-preset", "9",
-		"-crf", "32",
-		"-g", "240",
-		"-svtav1-params",
-		fmt.Sprintf("tune=0:film-grain=0:fast-decode=1:mbr=400000"),
+		"-f", "concat",
+		"-safe", "0",
+		"-i", concatListPath,
+		"-c", "copy",
 		"-movflags", "+faststart",
-		"-c:a", "aac",
-		"-b:a", "128k",
 		"-y", outputPath,
 	)
 
@@ -429,92 +726,10 @@ func (p *videoProcessor) encodeSingleSegment(inputPath, outputPath string, bitra
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("ffmpeg encoding failed: %v, stderr: %s", err, stderr.String())
+		return fmt.Errorf("ffmpeg concat failed: %v, stderr: %s", err, stderr.String())
 	}
 
 	return nil
-}
-
-func StitchSegments(segments []string, outputPath string) error {
-	listFile := "concat_list.txt"
-	file, err := os.Create(listFile)
-	if err != nil {
-		return err
-	}
-	defer os.Remove(listFile)
-
-	for _, seg := range segments {
-
-		absPath, err := filepath.Abs(seg)
-		if err != nil {
-			return err
-		}
-		file.WriteString(fmt.Sprintf("file '%s'\n", absPath))
-	}
-	file.Close()
-
-	cmd := exec.Command("ffmpeg",
-		"-f", "concat",
-		"-safe", "0",
-		"-i", listFile,
-		"-c", "copy",
-		"-movflags", "+faststart",
-		"-y", outputPath,
-	)
-
-	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
-	return cmd.Run()
-}
-
-func (p *videoProcessor) encodeSegments(segments []string, bitrate int) ([]string, error) {
-	type encodeResult struct {
-		index int
-		path  string
-		err   error
-	}
-
-	resultChan := make(chan encodeResult, len(segments))
-	sem := make(chan struct{}, MaxParallelJobs)
-	var wg sync.WaitGroup
-
-	outputDir := filepath.Join(p.tempDir, "encoded_segments")
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create output directory: %w", err)
-	}
-
-	for i, segment := range segments {
-		wg.Add(1)
-		go func(idx int, inputPath string) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			outputPath := filepath.Join(outputDir, fmt.Sprintf("encoded_%03d.mp4", idx))
-			err := p.encodeSingleSegment(inputPath, outputPath, bitrate)
-
-			resultChan <- encodeResult{
-				index: idx,
-				path:  outputPath,
-				err:   err,
-			}
-		}(i, segment)
-	}
-
-	go func() {
-		wg.Wait()
-		close(resultChan)
-	}()
-
-	encodedSegments := make([]string, len(segments))
-	for result := range resultChan {
-		if result.err != nil {
-			return nil, fmt.Errorf("segment %d encoding failed: %w", result.index, result.err)
-		}
-		encodedSegments[result.index] = result.path
-	}
-
-	return encodedSegments, nil
 }
 
 func GetVideoInfo(inputPath string) (*VideoInfo, error) {

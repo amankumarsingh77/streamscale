@@ -41,5 +41,5 @@ type VideoInfo struct {
 }
 
 type VideoProcessor interface {
-	ProcessVideo(ctx context.Context, inputPath, outputPath string, videoID uuid.UUID) (*ProcessingResult, error)
+	ProcessVideo(ctx context.Context, job *models.EncodeJob, videoID uuid.UUID) (*ProcessingResult, error)
 }

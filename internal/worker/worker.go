@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -229,7 +230,7 @@ func (w *Worker) processJob(ctx context.Context, workerID int, job *models.Encod
 	}
 
 	processor := NewVideoProcessor(w.cfg, w.awsRepo, w.videoRepo, w.logger)
-	result, err := processor.ProcessVideo(ctx, job.InputS3Key, job.OutputS3Key, videoID)
+	result, err := processor.ProcessVideo(ctx, job, videoID)
 	if err != nil {
 		if updateErr := w.redisRepo.UpdateStatus(ctx, job.VideoID, VideoJobsQueue, "failed"); updateErr != nil {
 			w.logger.Errorf("Failed to update job status to failed: %v", updateErr)
@@ -263,16 +264,48 @@ func (w *Worker) processJob(ctx context.Context, workerID int, job *models.Encod
 		outputPath = strings.TrimSuffix(outputPath, ext)
 	}
 
-	for _, quality := range job.Qualities {
-		qualityKey := models.VideoQuality(quality.Resolution)
+	// Add each quality to the playback info
+	for _, qualityInfo := range result.Qualities {
+		// Extract resolution values
+		resolutionParts := strings.Split(qualityInfo.Resolution, "x")
+		if len(resolutionParts) != 2 {
+			continue
+		}
+
+		// Determine quality key based on resolution
+		var qualityKey models.VideoQuality
+		width, _ := strconv.Atoi(resolutionParts[0])
+
+		switch {
+		case width >= 1920:
+			qualityKey = models.Quality1080P
+		case width >= 1280:
+			qualityKey = models.Quality720P
+		case width >= 854:
+			qualityKey = models.Quality480P
+		default:
+			qualityKey = models.Quality360P
+		}
+
+		// Create quality info
 		playbackInfo.Qualities[qualityKey] = models.QualityInfo{
 			URLs: models.PlaybackURLs{
-				HLS:  fmt.Sprintf("%s/%s/master.m3u8", w.cfg.S3.CDNEndpoint, outputPath),
-				DASH: fmt.Sprintf("%s/%s/stream.mpd", w.cfg.S3.CDNEndpoint, outputPath),
+				HLS:  fmt.Sprintf("%s/%s/%s/master.m3u8", w.cfg.S3.CDNEndpoint, outputPath, qualityKey),
+				DASH: fmt.Sprintf("%s/%s/%s/stream.mpd", w.cfg.S3.CDNEndpoint, outputPath, qualityKey),
 			},
-			Resolution: quality.Resolution,
-			Bitrate:    quality.Bitrate,
+			Resolution: qualityInfo.Resolution,
+			Bitrate:    qualityInfo.Bitrate,
 		}
+	}
+
+	// Add a special "master" quality entry that points to the top-level master playlist
+	playbackInfo.Qualities[models.QualityMaster] = models.QualityInfo{
+		URLs: models.PlaybackURLs{
+			HLS:  fmt.Sprintf("%s/%s/master.m3u8", w.cfg.S3.CDNEndpoint, outputPath),
+			DASH: fmt.Sprintf("%s/%s/stream.mpd", w.cfg.S3.CDNEndpoint, outputPath),
+		},
+		Resolution: "adaptive",
+		Bitrate:    0,
 	}
 
 	if err := w.videoRepo.CreatePlaybackInfo(ctx, videoID, playbackInfo); err != nil {
