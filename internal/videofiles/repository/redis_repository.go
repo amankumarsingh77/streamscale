@@ -40,6 +40,7 @@ func (v *videoRedisRepo) EnqueueJob(ctx context.Context, key string, videoJob *m
 		"status":        string(videoJob.Status),
 		"started_at":    videoJob.StartedAt.Format(time.RFC3339),
 		"input_bucket":  videoJob.InputBucket,
+		"codec":         string(videoJob.Codec),
 		"output_bucket": videoJob.OutputBucket,
 	})
 
@@ -89,6 +90,7 @@ func (v *videoRedisRepo) GetJobDetails(ctx context.Context, jobID string) (*mode
 		InputS3Key:   jobData["input_key"],
 		OutputS3Key:  jobData["output_key"],
 		Status:       models.JobStatus(jobData["status"]),
+		Codec:        models.Codec(jobData["codec"]),
 		StartedAt:    startedAt,
 		InputBucket:  jobData["input_bucket"],
 		OutputBucket: jobData["output_bucket"],

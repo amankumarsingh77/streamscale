@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/amankumarsingh77/cloud-video-encoder/internal/config"
@@ -103,6 +104,7 @@ func (v *videoFileUC) CreateJob(ctx context.Context, input *models.VideoUploadIn
 		v.logger.Errorf("GetUserFromCtx: %v", err)
 		return nil, err
 	}
+	log.Println("input", input)
 	if err = utils.ValidateStruct(ctx, input); err != nil {
 		v.logger.Errorf("UploadVideo - ValidateStruct error: %v", err)
 		return nil, fmt.Errorf("invalid input: %v", err)
@@ -131,6 +133,10 @@ func (v *videoFileUC) CreateJob(ctx context.Context, input *models.VideoUploadIn
 			models.FormatHLS,
 		}
 	}
+	if input.Codec == "" {
+		input.Codec = models.CodecH264
+	}
+
 	videoFile := &models.VideoFile{
 		UserID:   user.UserID,
 		FileName: input.FileName,
@@ -160,6 +166,7 @@ func (v *videoFileUC) CreateJob(ctx context.Context, input *models.VideoUploadIn
 		OutputFormats:          input.OutputFormats,
 		EnablePerTitleEncoding: input.EnablePerTitleEncoding,
 		Status:                 videoFile.Status,
+		Codec:                  input.Codec,
 		StartedAt:              time.Now(),
 	}
 	if err = v.redisRepo.EnqueueJob(ctx, v.cfg.Redis.JobQueueKey, job); err != nil {

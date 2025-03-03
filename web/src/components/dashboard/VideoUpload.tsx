@@ -140,6 +140,7 @@ export default function VideoUpload() {
                 file_size: file.size,
                 duration: duration,
                 format: file.type.split('/')[1],
+                codec: "av1",
                 qualities: [
                   {
                     resolution: "1080p",

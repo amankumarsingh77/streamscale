@@ -51,7 +51,7 @@ func (s *Server) Run() error {
 	s.echo.Server.MaxHeaderBytes = maxHeaderBytes
 	s.echo.Server.ReadTimeout = time.Second * s.echo.Server.ReadTimeout
 	s.echo.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins:     []string{"*"}, // Add your frontend URLs here
+		AllowOrigins:     []string{"http://localhost:5173"}, // Add your frontend URLs here
 		AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions},
 		AllowHeaders:     []string{"Content-Type", "Authorization"},
 		AllowCredentials: true, // This is crucial for cookies

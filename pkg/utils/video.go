@@ -1,8 +1,9 @@
 package utils
 
 import (
-	"github.com/amankumarsingh77/cloud-video-encoder/internal/models"
 	"time"
+
+	"github.com/amankumarsingh77/cloud-video-encoder/internal/models"
 )
 
 func GetDefaultMinBitrate(resolution string) int {

@@ -5,12 +5,13 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"github.com/go-redis/redis/v8"
 	"time"
+
+	"github.com/go-redis/redis/v8"
 )
 
 const (
-	NewVideoJobsQueue = "new_video_jobs"
+	NewVideoJobsQueue = "video_jobs"
 	JobChannel        = "new_video_jobs_channel"
 )
 
@@ -22,6 +23,7 @@ type EncodeJob struct {
 	InputBucket            string             `json:"input_bucket" redis:"input_bucket"`
 	Progress               float64            `json:"progress" redis:"progress"`
 	OutputS3Key            string             `json:"output_s3_key" redis:"output_s3_key"`
+	Codec                  string             `json:"codec" redis:"codec"`
 	OutputBucket           string             `json:"output_bucket" redis:"output_bucket"`
 	Qualities              []InputQualityInfo `json:"qualities" redis:"qualities"`
 	OutputFormats          []PlaybackFormat   `json:"output_formats" redis:"output_formats"`
@@ -62,12 +64,13 @@ func main() {
 	// Create a job
 	job := EncodeJob{
 		JobID:                  "12345",
-		UserID:                 "user_001",
-		VideoID:                "video_001",
-		InputS3Key:             "BitBloom.mp4",
+		UserID:                 "4d27c85d-2d44-4c19-984e-fe85d346effc",
+		VideoID:                "4d27c85d-2d44-4c19-984e-fe85d346effc",
+		InputS3Key:             "marco.mp4",
 		InputBucket:            "input-bucket",
+		Codec:                  "h264",
 		Progress:               0.0,
-		OutputS3Key:            "temp/output/video_001_encoded.mp4",
+		OutputS3Key:            "output/marco",
 		OutputBucket:           "output-bucket",
 		Qualities:              []InputQualityInfo{},
 		OutputFormats:          []PlaybackFormat{},

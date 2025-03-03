@@ -41,6 +41,7 @@ type VideoUploadInput struct {
 	FileName               string             `json:"filename" validate:"required,lte=255"`
 	FileSize               int64              `json:"file_size" validate:"required"`
 	Duration               int64              `json:"duration" validate:"required"`
+	Codec                  Codec              `json:"codec" validate:"required"`
 	Format                 string             `json:"format" validate:"required,lte=20"`
 	Qualities              []InputQualityInfo `json:"qualities" validate:"dive"`
 	OutputFormats          []PlaybackFormat   `json:"output_formats" validate:"dive"`

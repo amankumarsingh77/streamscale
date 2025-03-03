@@ -18,7 +18,7 @@ const (
 	Quality720P   VideoQuality = "720p"
 	Quality480P   VideoQuality = "480p"
 	Quality360P   VideoQuality = "360p"
-	QualityMaster VideoQuality = "master" // Represents the adaptive master playlist
+	QualityMaster VideoQuality = "master"
 )
 
 type InputQualityInfo struct {
