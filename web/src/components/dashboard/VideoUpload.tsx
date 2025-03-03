@@ -17,8 +17,12 @@ import {
   Zap,
   Shield,
   Info,
+  Settings,
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { VideoUploadSettings, VideoUploadSettings as IVideoUploadSettings } from "./VideoUploadSettings";
+
+type UploadStatus = 'idle' | 'uploading' | 'in_progress' | 'complete' | 'error';
 
 export default function VideoUpload() {
   const navigate = useNavigate();
@@ -26,8 +30,10 @@ export default function VideoUpload() {
   const [duration, setDuration] = useState<number>(0);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [status, setStatus] = useState<'idle' | 'uploading' | 'in_progress' | 'complete' | 'error'>('idle');
+  const [status, setStatus] = useState<UploadStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [uploadSettings, setUploadSettings] = useState<IVideoUploadSettings | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -102,6 +108,10 @@ export default function VideoUpload() {
     fileInputRef.current?.click();
   };
 
+  const handleSettingsSubmit = (settings: IVideoUploadSettings) => {
+    setUploadSettings(settings);
+  };
+
   const handleUpload = async () => {
     if (!file) return;
 
@@ -140,15 +150,15 @@ export default function VideoUpload() {
                 file_size: file.size,
                 duration: duration,
                 format: file.type.split('/')[1],
-                codec: "av1",
-                qualities: [
+                codec: uploadSettings?.codec || "h264",
+                qualities: uploadSettings?.qualities || [
                   {
                     resolution: "1080p",
                     bitrate: 5000000
                   }
                 ],
-                output_formats: ["hls"],
-                enable_per_title_encoding: false
+                output_formats: uploadSettings?.outputFormats || ["hls"],
+                enable_per_title_encoding: uploadSettings?.enablePerTitleEncoding || false
               };
 
               console.log('Creating job with params:', jobParams);
@@ -219,16 +229,16 @@ export default function VideoUpload() {
     <div className="container max-w-7xl mx-auto py-8 px-4">
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight mb-2 flex items-center gap-2">
+          <h1 className="text-3xl font-bold tracking-tight mb-2 flex items-center gap-3">
             <span className="text-white">Upload</span>
-            <span className="text-violet-400">New Video</span>
+            <span className="text-indigo-400">New Video</span>
           </h1>
-          <p className="text-slate-400 text-sm">Upload and process your video in one go</p>
+          <p className="text-gray-400 text-sm">Upload and process your video in one go</p>
         </div>
         <Button
           variant="link"
           onClick={() => navigate('/dashboard')}
-          className="text-blue-400 hover:text-blue-300 flex items-center gap-2"
+          className="text-gray-400 hover:text-white flex items-center gap-2"
         >
           <ArrowLeft className="w-4 h-4" />
           Back to Dashboard
@@ -245,12 +255,12 @@ export default function VideoUpload() {
             </Alert>
           )}
 
-          <Card className="bg-black/20 backdrop-blur-xl border border-dashed border-slate-800 overflow-hidden">
-            {status === 'idle' && (
+          <Card className="bg-gradient-to-b from-gray-900 to-gray-950 border border-dashed border-gray-800 overflow-hidden shadow-xl">
+            {status === 'idle' && !file && (
               <div
                 className={`relative transition-colors ${isDragging
-                  ? 'bg-violet-500/5 border-violet-400'
-                  : 'hover:border-violet-500/50'
+                  ? 'bg-indigo-500/5 border-indigo-400'
+                  : 'hover:border-indigo-500/50'
                   }`}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
@@ -263,19 +273,22 @@ export default function VideoUpload() {
                   onChange={handleFileSelect}
                   className="hidden"
                 />
-                <div className="flex flex-col items-center justify-center py-32 cursor-pointer">
-                  <div className="w-16 h-16 rounded-xl bg-violet-500/10 flex items-center justify-center mb-6">
-                    <FileVideo className="w-8 h-8 text-violet-400" />
+                <div className="flex flex-col items-center justify-center py-32 cursor-pointer" onClick={handleChooseVideo}>
+                  <div className="w-24 h-24 rounded-2xl bg-indigo-500/10 flex items-center justify-center mb-6 border border-indigo-500/20">
+                    <FileVideo className="w-12 h-12 text-indigo-400" />
                   </div>
-                  <h3 className="text-lg font-medium text-white mb-2">
+                  <h3 className="text-xl font-medium text-white mb-2">
                     Drag and drop your video here
                   </h3>
-                  <p className="text-slate-400 text-sm mb-6">
+                  <p className="text-gray-400 text-sm mb-8">
                     or click to browse from your computer
                   </p>
                   <Button
-                    className="bg-violet-600 hover:bg-violet-500"
-                    onClick={handleChooseVideo}
+                    className="bg-indigo-600 hover:bg-indigo-500 h-11 px-8"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleChooseVideo();
+                    }}
                   >
                     <Upload className="w-4 h-4 mr-2" />
                     Choose Video
@@ -286,17 +299,17 @@ export default function VideoUpload() {
 
             {file && status === 'idle' && (
               <div className="p-6 space-y-6">
-                <div className="p-4 bg-violet-500/10 border border-violet-500/20 rounded-lg flex items-start justify-between">
+                <div className="p-5 bg-indigo-500/5 border border-indigo-500/20 rounded-lg flex items-start justify-between">
                   <div className="flex items-start gap-4">
-                    <div className="w-12 h-12 rounded-lg bg-black/40 flex items-center justify-center flex-shrink-0">
-                      <FileVideo className="w-6 h-6 text-violet-400" />
+                    <div className="w-14 h-14 rounded-lg bg-black/40 flex items-center justify-center flex-shrink-0 border border-indigo-500/20">
+                      <FileVideo className="w-7 h-7 text-indigo-400" />
                     </div>
                     <div>
-                      <p className="font-medium text-white mb-1">{file.name}</p>
+                      <p className="font-medium text-white mb-1 text-lg">{file.name}</p>
                       <div className="flex items-center gap-3 text-sm">
-                        <span className="text-slate-400">{(file.size / (1024 * 1024)).toFixed(2)} MB</span>
-                        <span className="text-slate-600">•</span>
-                        <span className="text-slate-400">{Math.floor(duration / 60)}:{String(Math.floor(duration % 60)).padStart(2, '0')}</span>
+                        <span className="text-gray-400">{(file.size / (1024 * 1024)).toFixed(2)} MB</span>
+                        <span className="text-gray-600">•</span>
+                        <span className="text-gray-400">{Math.floor(duration / 60)}:{String(Math.floor(duration % 60)).padStart(2, '0')}</span>
                       </div>
                     </div>
                   </div>
@@ -304,115 +317,158 @@ export default function VideoUpload() {
                     variant="ghost"
                     size="icon"
                     onClick={() => setFile(null)}
-                    className="text-slate-400 hover:text-white"
+                    className="text-gray-400 hover:text-white hover:bg-gray-800"
                   >
                     <X className="w-4 h-4" />
                   </Button>
                 </div>
 
-                <Button
-                  className="w-full bg-violet-600 hover:bg-violet-500 font-medium tracking-wide h-11"
-                  onClick={handleUpload}
-                >
-                  Start Processing
-                </Button>
+                <div className="space-y-4">
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <Button
+                      className="flex-1 bg-gray-800 hover:bg-gray-700 font-medium tracking-wide h-11 border border-gray-700"
+                      onClick={() => setShowSettings(true)}
+                    >
+                      <Settings className="w-4 h-4 mr-2" />
+                      Configure Settings
+                    </Button>
+                    
+                    <Button
+                      className={`flex-1 h-11 ${uploadSettings 
+                        ? 'bg-indigo-600 hover:bg-indigo-500' 
+                        : 'bg-gray-700 cursor-not-allowed'}`}
+                      onClick={handleUpload}
+                      disabled={!uploadSettings}
+                    >
+                      <Upload className="w-4 h-4 mr-2" />
+                      Start Upload
+                    </Button>
+                  </div>
+
+                  {!uploadSettings ? (
+                    <div className="p-4 bg-gray-800/50 border border-gray-700 rounded-lg flex items-center gap-3">
+                      <Info className="w-5 h-5 text-indigo-400 flex-shrink-0" />
+                      <p className="text-sm text-gray-300">
+                        Please configure encoding settings before uploading
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="p-4 bg-gray-800/50 border border-gray-700 rounded-lg">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="text-sm font-medium text-white">Selected Settings</h4>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setShowSettings(true)}
+                          className="text-xs text-indigo-400 hover:text-indigo-300 h-7 px-2"
+                        >
+                          Edit
+                        </Button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-gray-400">Codec:</span>
+                          <span className="text-xs font-medium text-white">{uploadSettings.codec.toUpperCase()}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-gray-400">Qualities:</span>
+                          <span className="text-xs font-medium text-white">
+                            {uploadSettings.qualities.filter(q => q.enabled).length} selected
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-gray-400">Format:</span>
+                          <span className="text-xs font-medium text-white">
+                            {uploadSettings.outputFormats.map(f => f.toUpperCase()).join(', ')}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-gray-400">Per-Title:</span>
+                          <span className="text-xs font-medium text-white">
+                            {uploadSettings.enablePerTitleEncoding ? 'Enabled' : 'Disabled'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
-            {(status === 'uploading' || status === 'in_progress') && (
-              <div className="p-8">
-                <div className="flex flex-col items-center text-center mb-8">
-                  <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-violet-500/20 to-fuchsia-500/20 backdrop-blur-sm flex items-center justify-center mb-6 border border-violet-500/20">
-                    {status === 'uploading' ? (
-                      <Upload className="w-10 h-10 text-violet-400 animate-bounce" />
-                    ) : (
-                      <div className="w-10 h-10 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
-                    )}
-                  </div>
-                  <h3 className="text-xl font-semibold text-white mb-2">
-                    {status === 'uploading' ? 'Uploading Video...' : 'Processing Video...'}
-                  </h3>
-                  <p className="text-slate-400 mb-8 max-w-md">
-                    {status === 'uploading'
-                      ? 'Your video is being uploaded. This might take a while depending on your file size and internet speed.'
-                      : 'We\'re optimizing your video for streaming. This includes transcoding, thumbnail generation, and quality optimization.'}
-                  </p>
+            {status === 'uploading' && (
+              <div className="p-6 space-y-6">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-lg font-medium text-white">Uploading Video</h3>
+                  <span className="text-sm text-indigo-400">{Math.round(uploadProgress)}%</span>
                 </div>
+                <Progress value={uploadProgress} className="h-2 bg-gray-800 [&>div]:bg-indigo-500" />
+                <p className="text-sm text-gray-400 text-center">Please don't close this window during upload</p>
+              </div>
+            )}
 
-                {status === 'uploading' && (
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="text-slate-400">Upload Progress</span>
-                      <span className="text-white font-medium">{Math.round(uploadProgress)}%</span>
-                    </div>
-                    <Progress value={uploadProgress} className="h-2" />
-                    <p className="text-xs text-slate-500 mt-2">
-                      Uploading {file?.name} ({(file?.size ? (file.size / (1024 * 1024)).toFixed(2) : 0)} MB)
-                    </p>
+            {status === 'in_progress' && (
+              <div className="p-6 space-y-6">
+                <div className="flex items-center justify-center mb-4">
+                  <div className="w-16 h-16 rounded-full bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20">
+                    <Zap className="w-8 h-8 text-indigo-400" />
                   </div>
-                )}
-
-                {status === 'in_progress' && (
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="p-4 bg-violet-500/5 border border-violet-500/10 rounded-lg text-center">
-                      <div className="w-8 h-8 rounded-full bg-violet-500/10 flex items-center justify-center mx-auto mb-2">
-                        <Film className="w-4 h-4 text-violet-400" />
-                      </div>
-                      <p className="text-sm font-medium text-white">Transcoding</p>
-                    </div>
-                    <div className="p-4 bg-violet-500/5 border border-violet-500/10 rounded-lg text-center">
-                      <div className="w-8 h-8 rounded-full bg-violet-500/10 flex items-center justify-center mx-auto mb-2">
-                        <Zap className="w-4 h-4 text-violet-400" />
-                      </div>
-                      <p className="text-sm font-medium text-white">Optimizing</p>
-                    </div>
-                    <div className="p-4 bg-violet-500/5 border border-violet-500/10 rounded-lg text-center">
-                      <div className="w-8 h-8 rounded-full bg-violet-500/10 flex items-center justify-center mx-auto mb-2">
-                        <Shield className="w-4 h-4 text-violet-400" />
-                      </div>
-                      <p className="text-sm font-medium text-white">Securing</p>
-                    </div>
+                </div>
+                <h3 className="text-xl font-medium text-white text-center">Processing Your Video</h3>
+                <p className="text-sm text-gray-400 text-center">
+                  We're encoding your video for optimal playback. This may take a few minutes.
+                </p>
+                <div className="flex justify-center">
+                  <div className="w-10 h-10 relative">
+                    <div className="w-10 h-10 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin"></div>
                   </div>
-                )}
+                </div>
               </div>
             )}
 
             {status === 'complete' && (
-              <div className="p-8 text-center">
-                <div className="w-20 h-20 rounded-2xl bg-emerald-500/20 backdrop-blur-sm flex items-center justify-center mx-auto mb-6 border border-emerald-500/20">
-                  <Check className="w-10 h-10 text-emerald-400" />
+              <div className="p-6 space-y-6">
+                <div className="flex items-center justify-center mb-4">
+                  <div className="w-16 h-16 rounded-full bg-green-500/10 flex items-center justify-center border border-green-500/20">
+                    <Check className="w-8 h-8 text-green-400" />
+                  </div>
                 </div>
-                <h3 className="text-xl font-semibold text-white mb-2">
-                  Upload Complete!
-                </h3>
-                <p className="text-slate-400 mb-6">
-                  Your video has been uploaded and processed successfully
+                <h3 className="text-xl font-medium text-white text-center">Upload Complete!</h3>
+                <p className="text-sm text-gray-400 text-center">
+                  Your video has been successfully processed and is ready to view.
                 </p>
-                <Button
-                  className="bg-violet-600 hover:bg-violet-700"
-                  onClick={() => navigate('/dashboard')}
-                >
-                  Go to Dashboard
-                </Button>
+                <div className="flex justify-center">
+                  <Button
+                    className="bg-indigo-600 hover:bg-indigo-500"
+                    onClick={() => navigate('/dashboard')}
+                  >
+                    Go to Dashboard
+                  </Button>
+                </div>
               </div>
             )}
 
             {status === 'error' && (
-              <div className="p-8 text-center">
-                <div className="w-20 h-20 rounded-2xl bg-red-500/20 backdrop-blur-sm flex items-center justify-center mx-auto mb-6 border border-red-500/20">
-                  <AlertCircle className="w-10 h-10 text-red-400" />
+              <div className="p-6 space-y-6">
+                <div className="flex items-center justify-center mb-4">
+                  <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center border border-red-500/20">
+                    <AlertCircle className="w-8 h-8 text-red-400" />
+                  </div>
                 </div>
-                <h3 className="text-xl font-semibold text-white mb-2">
-                  Upload Failed
-                </h3>
-                <p className="text-red-400 mb-6">{error}</p>
-                <Button
-                  variant="outline"
-                  onClick={() => setStatus('idle')}
-                  className="border-slate-800 hover:bg-slate-800"
-                >
-                  Try Again
-                </Button>
+                <h3 className="text-xl font-medium text-white text-center">Upload Failed</h3>
+                <p className="text-sm text-red-400 text-center">
+                  {error || "An error occurred during upload. Please try again."}
+                </p>
+                <div className="flex justify-center">
+                  <Button
+                    className="bg-indigo-600 hover:bg-indigo-500"
+                    onClick={() => {
+                      setStatus('idle');
+                      setError(null);
+                    }}
+                  >
+                    Try Again
+                  </Button>
+                </div>
               </div>
             )}
           </Card>
@@ -420,77 +476,84 @@ export default function VideoUpload() {
 
         {/* Right Sidebar - Upload Guidelines */}
         <div className="space-y-6">
-          <Card className="bg-black/20 backdrop-blur-xl border-slate-800 p-6">
+          <Card className="bg-gradient-to-b from-gray-900 to-gray-950 border-gray-800 p-6 shadow-xl">
             <h3 className="text-base font-medium text-white mb-4 flex items-center gap-2">
-              <Info className="w-4 h-4 text-violet-400" />
+              <Info className="w-4 h-4 text-indigo-400" />
               Upload Guidelines
             </h3>
             <div className="space-y-4">
               <div className="flex items-start gap-3">
-                <div className="w-5 h-5 rounded-full bg-violet-500/10 flex items-center justify-center flex-shrink-0">
-                  <Check className="w-3 h-3 text-violet-400" />
+                <div className="w-5 h-5 rounded-full bg-indigo-500/10 flex items-center justify-center flex-shrink-0 border border-indigo-500/20">
+                  <Check className="w-3 h-3 text-indigo-400" />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-white">Supported Formats</p>
-                  <p className="text-xs text-slate-400">MP4, MOV, AVI, MKV (H.264/H.265)</p>
+                  <p className="text-xs text-gray-400">MP4, MOV, AVI, MKV (H.264/H.265)</p>
                 </div>
               </div>
               <div className="flex items-start gap-3">
-                <div className="w-5 h-5 rounded-full bg-violet-500/10 flex items-center justify-center flex-shrink-0">
-                  <Check className="w-3 h-3 text-violet-400" />
+                <div className="w-5 h-5 rounded-full bg-indigo-500/10 flex items-center justify-center flex-shrink-0 border border-indigo-500/20">
+                  <Check className="w-3 h-3 text-indigo-400" />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-white">Maximum File Size</p>
-                  <p className="text-xs text-slate-400">Up to 2GB per video</p>
+                  <p className="text-xs text-gray-400">Up to 2GB per video</p>
                 </div>
               </div>
               <div className="flex items-start gap-3">
-                <div className="w-5 h-5 rounded-full bg-violet-500/10 flex items-center justify-center flex-shrink-0">
-                  <Check className="w-3 h-3 text-violet-400" />
+                <div className="w-5 h-5 rounded-full bg-indigo-500/10 flex items-center justify-center flex-shrink-0 border border-indigo-500/20">
+                  <Check className="w-3 h-3 text-indigo-400" />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-white">Resolution</p>
-                  <p className="text-xs text-slate-400">Up to 4K (3840×2160)</p>
+                  <p className="text-xs text-gray-400">Up to 4K (3840×2160)</p>
                 </div>
               </div>
               <div className="flex items-start gap-3">
-                <div className="w-5 h-5 rounded-full bg-violet-500/10 flex items-center justify-center flex-shrink-0">
-                  <Check className="w-3 h-3 text-violet-400" />
+                <div className="w-5 h-5 rounded-full bg-indigo-500/10 flex items-center justify-center flex-shrink-0 border border-indigo-500/20">
+                  <Check className="w-3 h-3 text-indigo-400" />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-white">Processing Time</p>
-                  <p className="text-xs text-slate-400">2-5 minutes for most videos</p>
+                  <p className="text-xs text-gray-400">2-5 minutes for most videos</p>
                 </div>
               </div>
             </div>
           </Card>
 
-          <Card className="bg-violet-500/5 backdrop-blur-xl border-violet-500/10 p-6">
+          <Card className="bg-indigo-500/5 backdrop-blur-xl border-indigo-500/10 p-6 shadow-xl">
             <h3 className="text-base font-medium text-white mb-4 flex items-center gap-2">
-              <Zap className="w-4 h-4 text-violet-400" />
+              <Zap className="w-4 h-4 text-indigo-400" />
               Processing Features
             </h3>
             <ul className="space-y-3">
-              <li className="flex items-center gap-2 text-sm text-slate-300">
-                <div className="w-1 h-1 rounded-full bg-violet-400"></div>
-                Automatic quality optimization
+              <li className="flex items-center gap-2 text-sm text-gray-300">
+                <div className="w-1 h-1 rounded-full bg-indigo-400"></div>
+                Adaptive bitrate streaming
               </li>
-              <li className="flex items-center gap-2 text-sm text-slate-300">
-                <div className="w-1 h-1 rounded-full bg-violet-400"></div>
+              <li className="flex items-center gap-2 text-sm text-gray-300">
+                <div className="w-1 h-1 rounded-full bg-indigo-400"></div>
                 Multiple resolution outputs
               </li>
-              <li className="flex items-center gap-2 text-sm text-slate-300">
-                <div className="w-1 h-1 rounded-full bg-violet-400"></div>
+              <li className="flex items-center gap-2 text-sm text-gray-300">
+                <div className="w-1 h-1 rounded-full bg-indigo-400"></div>
                 Thumbnail generation
               </li>
-              <li className="flex items-center gap-2 text-sm text-slate-300">
-                <div className="w-1 h-1 rounded-full bg-violet-400"></div>
-                Adaptive streaming support
+              <li className="flex items-center gap-2 text-sm text-gray-300">
+                <div className="w-1 h-1 rounded-full bg-indigo-400"></div>
+                Advanced codec options
               </li>
             </ul>
           </Card>
         </div>
       </div>
+
+      <VideoUploadSettings
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        onSubmit={handleSettingsSubmit}
+        defaultSettings={uploadSettings || undefined}
+      />
     </div>
   );
 }

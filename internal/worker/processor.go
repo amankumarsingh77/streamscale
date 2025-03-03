@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	maxConcurrentUploads = 2
+	maxConcurrentUploads = 20
 )
 
 type videoProcessor struct {
@@ -34,15 +34,17 @@ type videoProcessor struct {
 	videoRepo videofiles.Repository
 	logger    logger.Logger
 	tempDir   string
+	job       *models.EncodeJob
 }
 
-func NewVideoProcessor(cfg *config.Config, awsRepo videofiles.AWSRepository, videoRepo videofiles.Repository, logger logger.Logger) VideoProcessor {
+func NewVideoProcessor(cfg *config.Config, awsRepo videofiles.AWSRepository, videoRepo videofiles.Repository, logger logger.Logger, job *models.EncodeJob) VideoProcessor {
 	return &videoProcessor{
 		cfg:       cfg,
 		awsRepo:   awsRepo,
 		videoRepo: videoRepo,
 		logger:    logger,
 		tempDir:   TempDir,
+		job:       job,
 	}
 }
 
@@ -242,8 +244,15 @@ func (p *videoProcessor) encodeSegmentsWithQuality(segments []string, preset Qua
 }
 
 func (p *videoProcessor) encodeSingleSegmentWithQuality(inputPath, outputPath string, preset QualityPreset) error {
-
-	return p.encodeSingleSegmentWithSVTAV1(inputPath, outputPath, preset)
+	log.Println("p.job.Codec", p.job.Codec)
+	switch p.job.Codec {
+	case models.CodecH264:
+		return p.encodeSingleSegmentWithH264(inputPath, outputPath, preset)
+	case models.CodecAV1:
+		return p.encodeSingleSegmentWithSVTAV1(inputPath, outputPath, preset)
+	default:
+		return fmt.Errorf("unsupported codec: %s", p.job.Codec)
+	}
 }
 
 func (p *videoProcessor) encodeSingleSegmentWithH264(inputPath, outputPath string, preset QualityPreset) error {
@@ -462,7 +471,7 @@ func getContentType(filename string) string {
 	case ".mp4":
 		return "video/mp4"
 	case ".m4s":
-		return "video/iso.segment"
+		return "video/mp4"
 	case ".mpd":
 		return "application/dash+xml"
 	case ".json":
@@ -544,6 +553,31 @@ func (p *videoProcessor) splitVideo(inputPath string, videoInfo *VideoInfo) ([]s
 	return segments, nil
 }
 
+// normalizeVideoDuration ensures that the video has exactly the specified duration
+// This helps prevent alignment issues when packaging multiple quality versions
+func (p *videoProcessor) normalizeVideoDuration(inputPath string, targetDuration float64) (string, error) {
+	outputPath := inputPath + ".normalized.mp4"
+
+	// Use FFmpeg to precisely trim the video to the target duration
+	cmd := exec.Command("ffmpeg",
+		"-i", inputPath,
+		"-t", fmt.Sprintf("%.3f", targetDuration),
+		"-c", "copy",
+		"-avoid_negative_ts", "make_zero",
+		"-fflags", "+genpts",
+		outputPath,
+	)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("failed to normalize video duration: %v, stderr: %s", err, stderr.String())
+	}
+
+	return outputPath, nil
+}
+
 func (p *videoProcessor) stitchAndPackageMultiQuality(qualitySegments map[models.VideoQuality][]string, outputPath string) error {
 
 	packagingDir := filepath.Join(p.tempDir, "packaging")
@@ -551,7 +585,8 @@ func (p *videoProcessor) stitchAndPackageMultiQuality(qualitySegments map[models
 		return fmt.Errorf("failed to create packaging directory: %w", err)
 	}
 
-	fragmentPaths := []string{}
+	// First, stitch all segments for each quality
+	stitchedPaths := make(map[models.VideoQuality]string)
 	for quality, segments := range qualitySegments {
 		qualityOutputPath := filepath.Join(outputPath, string(quality))
 		if err := os.MkdirAll(qualityOutputPath, 0755); err != nil {
@@ -563,13 +598,48 @@ func (p *videoProcessor) stitchAndPackageMultiQuality(qualitySegments map[models
 			return fmt.Errorf("failed to stitch segments for quality %s: %w", quality, err)
 		}
 
+		stitchedPaths[quality] = stitchedPath
+	}
+
+	// Get duration of the first video to use as reference
+	var referenceDuration float64
+	var referenceQuality models.VideoQuality
+	for quality, path := range stitchedPaths {
+		info, err := GetVideoInfo(path)
+		if err != nil {
+			return fmt.Errorf("failed to get video info for quality %s: %w", quality, err)
+		}
+		referenceDuration = info.Duration
+		referenceQuality = quality
+		break
+	}
+
+	// Ensure all videos have the same duration
+	fragmentPaths := []string{}
+	for quality, stitchedPath := range stitchedPaths {
+		info, err := GetVideoInfo(stitchedPath)
+		if err != nil {
+			return fmt.Errorf("failed to get video info for quality %s: %w", quality, err)
+		}
+
+		// If durations differ by more than 0.1 seconds, normalize the duration
+		normalizedPath := stitchedPath
+		if math.Abs(info.Duration-referenceDuration) > 0.1 {
+			p.logger.Warn(fmt.Sprintf("Duration mismatch: %s (%.3fs) vs %s (%.3fs) - normalizing",
+				quality, info.Duration, referenceQuality, referenceDuration))
+
+			normalizedPath, err = p.normalizeVideoDuration(stitchedPath, referenceDuration)
+			if err != nil {
+				return fmt.Errorf("failed to normalize duration for quality %s: %w", quality, err)
+			}
+		}
+
 		fragmentedPath := filepath.Join(packagingDir, fmt.Sprintf("fragmented_%s.mp4", quality))
-		if err := p.fragmentVideo(stitchedPath, fragmentedPath); err != nil {
+		if err := p.fragmentVideo(normalizedPath, fragmentedPath); err != nil {
 			return fmt.Errorf("failed to fragment video for quality %s: %w", quality, err)
 		}
 
 		fragmentPaths = append(fragmentPaths, fragmentedPath)
-
 	}
 
 	opts := stitchAndPackageOptions{
@@ -578,7 +648,7 @@ func (p *videoProcessor) stitchAndPackageMultiQuality(qualitySegments map[models
 		withDASH:        true,
 	}
 
-	log.Println("fragmentPaths", fragmentPaths)
+	p.logger.Info(fmt.Sprintf("Packaging %d fragment paths", len(fragmentPaths)))
 
 	if err := p.packageVideo(fragmentPaths, outputPath, opts); err != nil {
 		return fmt.Errorf("failed to package video: %w", err)

@@ -220,7 +220,6 @@ func (w *Worker) processJob(ctx context.Context, workerID int, job *models.Encod
 		}
 	}
 
-	// Initial status - Processing with 0% progress
 	if err := w.videoRepo.UpdateVideoProgress(ctx, videoID, models.JobStatusProcessing, 0); err != nil {
 		w.logger.Errorf("Failed to update initial progress: %v", err)
 	}
@@ -229,20 +228,19 @@ func (w *Worker) processJob(ctx context.Context, workerID int, job *models.Encod
 		w.logger.Errorf("Failed to update job status: %v", err)
 	}
 
-	processor := NewVideoProcessor(w.cfg, w.awsRepo, w.videoRepo, w.logger)
+	processor := NewVideoProcessor(w.cfg, w.awsRepo, w.videoRepo, w.logger, job)
 	result, err := processor.ProcessVideo(ctx, job, videoID)
 	if err != nil {
 		if updateErr := w.redisRepo.UpdateStatus(ctx, job.VideoID, VideoJobsQueue, "failed"); updateErr != nil {
 			w.logger.Errorf("Failed to update job status to failed: %v", updateErr)
 		}
-		// Set status to Failed with 0% progress
+
 		if updateErr := w.videoRepo.UpdateVideoProgress(ctx, videoID, models.JobStatusFailed, 0); updateErr != nil {
 			w.logger.Errorf("Failed to update progress on failure: %v", updateErr)
 		}
 		return fmt.Errorf("failed to process video: %w", err)
 	}
 
-	// Set status to Completed with 100% progress
 	if err := w.videoRepo.UpdateVideoProgress(ctx, videoID, models.JobStatusCompleted, 100); err != nil {
 		w.logger.Errorf("Failed to update final progress: %v", err)
 	}
@@ -257,22 +255,18 @@ func (w *Worker) processJob(ctx context.Context, workerID int, job *models.Encod
 		Status:    models.JobStatusCompleted,
 	}
 
-	// Strip any video file extension from the output path
 	outputPath := job.OutputS3Key
 	videoExtensions := []string{".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm"}
 	for _, ext := range videoExtensions {
 		outputPath = strings.TrimSuffix(outputPath, ext)
 	}
 
-	// Add each quality to the playback info
 	for _, qualityInfo := range result.Qualities {
-		// Extract resolution values
 		resolutionParts := strings.Split(qualityInfo.Resolution, "x")
 		if len(resolutionParts) != 2 {
 			continue
 		}
 
-		// Determine quality key based on resolution
 		var qualityKey models.VideoQuality
 		width, _ := strconv.Atoi(resolutionParts[0])
 
@@ -287,7 +281,6 @@ func (w *Worker) processJob(ctx context.Context, workerID int, job *models.Encod
 			qualityKey = models.Quality360P
 		}
 
-		// Create quality info
 		playbackInfo.Qualities[qualityKey] = models.QualityInfo{
 			URLs: models.PlaybackURLs{
 				HLS:  fmt.Sprintf("%s/%s/%s/master.m3u8", w.cfg.S3.CDNEndpoint, outputPath, qualityKey),
@@ -298,7 +291,6 @@ func (w *Worker) processJob(ctx context.Context, workerID int, job *models.Encod
 		}
 	}
 
-	// Add a special "master" quality entry that points to the top-level master playlist
 	playbackInfo.Qualities[models.QualityMaster] = models.QualityInfo{
 		URLs: models.PlaybackURLs{
 			HLS:  fmt.Sprintf("%s/%s/master.m3u8", w.cfg.S3.CDNEndpoint, outputPath),

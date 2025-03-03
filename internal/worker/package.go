@@ -59,7 +59,8 @@ func (p *videoProcessor) stitchSegments(segments []string, outputPath string) er
 func (p *videoProcessor) fragmentVideo(inputPath, outputPath string) error {
 	cmd := exec.Command("mp4fragment",
 		"--fragment-duration", "4000",
-		"--timescale", "1000",
+		"--timescale", "90000",
+		"--normalize-timestamps",
 		inputPath,
 		outputPath,
 	)
@@ -78,6 +79,9 @@ func (p *videoProcessor) packageVideo(inputPaths []string, outputPath string, op
 	args := []string{
 		"--output-dir", outputPath,
 		"--force",
+		"--use-segment-timeline",
+		"--no-split",
+		"--segment-duration", fmt.Sprintf("%d", opts.segmentDuration),
 	}
 
 	// Add format-specific arguments
@@ -95,7 +99,7 @@ func (p *videoProcessor) packageVideo(inputPaths []string, outputPath string, op
 
 	cmd := exec.Command("mp4dash", args...)
 
-	log.Println(args)
+	log.Printf("Running mp4dash with args: %v", args)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
