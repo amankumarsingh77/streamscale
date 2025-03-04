@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/amankumarsingh77/cloud-video-encoder/internal/models"
@@ -104,6 +105,7 @@ func (v *videoRepo) GetVideoByID(ctx context.Context, videoID uuid.UUID) (*model
 	).StructScan(video); err != nil {
 		return nil, fmt.Errorf("failed to get video by id: %w", err)
 	}
+	log.Println("video", video)
 	return video, nil
 }
 

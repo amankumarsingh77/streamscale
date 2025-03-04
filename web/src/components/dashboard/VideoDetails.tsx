@@ -20,7 +20,7 @@ export default function VideoDetails() {
   const [playbackInfo, setPlaybackInfo] = useState<PlaybackInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [progress, setProgress] = useState(0);
+  // const [progress, setProgress] = useState(0);
 
   useEffect(() => {
     const fetchVideoData = async () => {
@@ -59,25 +59,6 @@ export default function VideoDetails() {
         const videoData = await videoApi.getVideo(videoId!);
         setVideo(videoData);
 
-        // Calculate progress based on status
-        let progressValue = 0;
-        switch (videoData.status) {
-          case 'queued':
-            progressValue = 25;
-            break;
-          case 'processing':
-            progressValue = 75;
-            break;
-          case 'completed':
-            progressValue = 100;
-            break;
-          case 'failed':
-            progressValue = 0;
-            break;
-          default:
-            progressValue = 0;
-        }
-        setProgress(progressValue);
 
         // If completed, fetch playback info
         if (videoData.status === 'completed') {
@@ -247,12 +228,12 @@ export default function VideoDetails() {
               <div className="h-1.5 w-full bg-violet-500/10 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-violet-400 to-fuchsia-400 rounded-full transition-all duration-500 ease-out"
-                  style={{ width: `${progress}%` }}
+                  style={{ width: `${video.progress}%` }}
                 />
               </div>
               <p className="text-sm text-slate-400 mt-2">
-                {progress < 100
-                  ? `Processing: ${progress}% complete`
+                {video.progress < 100
+                  ? `Processing: ${video.progress}% complete`
                   : 'Processing complete'}
               </p>
             </div>

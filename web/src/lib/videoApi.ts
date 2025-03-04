@@ -31,6 +31,7 @@ export interface VideoFile {
   file_size: number;
   duration: number;
   s3_key: string;
+  progress: number;
   status: JobStatus;
   s3_bucket: string;
   format: string;

@@ -5,7 +5,7 @@ const (
 					VALUES ($1, $2, $3, NULLIF($4, 0), $5, $6, $7, $8, $9) RETURNING *`
 	getVideosByUserIDQuery = `SELECT video_id, user_id, file_name, file_size, duration, s3_key, s3_bucket, format, status, uploaded_at, updated_at FROM video_files
 					WHERE user_id = $1 ORDER BY uploaded_at OFFSET $2 LIMIT $3`
-	getVideoByIDQuery = `SELECT video_id, user_id, file_name, file_size, duration, s3_key, s3_bucket, format, status, uploaded_at, updated_at FROM video_files
+	getVideoByIDQuery = `SELECT video_id, user_id, file_name, file_size, duration, s3_key, s3_bucket, format, progress, status, uploaded_at, updated_at FROM video_files
 					WHERE video_id = $1`
 	getTotalVideosByUserIDQuery = `SELECT COUNT(video_id) FROM video_files WHERE user_id = $1`
 	getTotalVideosCountQuery    = `SELECT COUNT(video_id) FROM video_files WHERE user_id = $1 AND file_name ILIKE '%' || $2 || '%'`
