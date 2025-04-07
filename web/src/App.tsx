@@ -5,6 +5,8 @@ import VideoList from "@/components/dashboard/VideoList";
 import VideoUpload from "@/components/dashboard/VideoUpload";
 import VideoDetails from "@/components/dashboard/VideoDetails";
 import VideoPlayer from "@/components/dashboard/VideoPlayer";
+import MyVideos from "@/components/dashboard/MyVideos";
+import DashboardAnalytics from "@/components/dashboard/DashboardAnalytics";
 import LandingPage from "@/components/landing/LandingPage";
 import LoginForm from "@/components/auth/LoginForm";
 import SignupForm from "@/components/auth/SignupForm";
@@ -65,15 +67,16 @@ function App() {
         } />
 
         {/* Protected Routes */}
-        <Route path="/dashboard" element={
+        <Route path="/dashboard/*" element={
           <ProtectedRoute>
             <DashboardLayout />
           </ProtectedRoute>
         }>
-          <Route index element={<VideoList />} />
+          <Route index element={<DashboardAnalytics />} />
           <Route path="upload" element={<VideoUpload />} />
           <Route path="video/:videoId" element={<VideoDetails />} />
           <Route path="play/:videoId" element={<VideoPlayer />} />
+          <Route path="videos" element={<MyVideos />} />
         </Route>
 
         {/* Catch all route - redirect to dashboard if logged in, otherwise to login */}

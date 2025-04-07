@@ -16,15 +16,19 @@ export interface VideoLayoutProps {
   onQualityChange?: (quality: string) => void;
   playbackSpeed?: number;
   onPlaybackSpeedChange?: (speed: number) => void;
+  qualityTooltip?: string;
+  speedTooltip?: string;
 }
 
-export function VideoLayout({ 
+export function VideoLayout({
   thumbnails,
   qualities = [],
   selectedQuality = 'auto',
   onQualityChange,
   playbackSpeed = 1,
-  onPlaybackSpeedChange
+  onPlaybackSpeedChange,
+  qualityTooltip,
+  speedTooltip
 }: VideoLayoutProps) {
   return (
     <>
@@ -47,8 +51,8 @@ export function VideoLayout({
           <Title />
           <div className="flex-1" />
           <Buttons.Caption tooltipPlacement="top" />
-          <Menus.Settings 
-            placement="top end" 
+          <Menus.Settings
+            placement="top end"
             tooltipPlacement="top"
             qualities={qualities}
             selectedQuality={selectedQuality}

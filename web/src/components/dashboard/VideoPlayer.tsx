@@ -44,14 +44,14 @@ export default function VideoPlayer() {
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-500"></div>
       </div>
     );
   }
 
   if (error || !video) {
     return (
-      <Card className="p-6 bg-black/20 backdrop-blur-xl border-white/10">
+      <Card className="p-6 bg-red-500/10 backdrop-blur-xl border-red-500/20">
         <div className="flex flex-col items-center text-center">
           <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mb-4">
             <AlertTriangle className="w-8 h-8 text-red-400" />
@@ -61,7 +61,9 @@ export default function VideoPlayer() {
           <Button
             variant="outline"
             onClick={() => navigate('/dashboard')}
-            className="border-white/10 hover:bg-white/5"
+            className="border-red-500/20 hover:bg-red-500/10"
+            aria-label="Back to Dashboard"
+            title="Back to Dashboard"
           >
             Back to Dashboard
           </Button>
@@ -77,6 +79,8 @@ export default function VideoPlayer() {
           variant="ghost"
           onClick={() => navigate('/dashboard')}
           className="text-slate-400 hover:text-white"
+          aria-label="Back to Dashboard"
+          title="Back to Dashboard"
         >
           <ArrowLeft className="w-4 h-4 mr-2" />
           Back to Dashboard
@@ -123,6 +127,8 @@ export default function VideoPlayer() {
         variant="ghost"
         onClick={() => navigate('/dashboard')}
         className="text-slate-400 hover:text-white"
+        aria-label="Back to Dashboard"
+        title="Back to Dashboard"
       >
         <ArrowLeft className="w-4 h-4 mr-2" />
         Back to Dashboard

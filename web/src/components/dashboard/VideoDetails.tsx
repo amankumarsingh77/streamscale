@@ -11,6 +11,8 @@ import {
   ArrowLeft,
   Clock,
   AlertTriangle,
+  VideoIcon,
+  SlidersHorizontal,
 } from "lucide-react";
 
 export default function VideoDetails() {
@@ -103,14 +105,14 @@ export default function VideoDetails() {
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-500"></div>
       </div>
     );
   }
 
   if (error || !video) {
     return (
-      <Card className="p-6 bg-black/20 backdrop-blur-xl border-white/10">
+      <Card className="p-6 bg-red-500/10 backdrop-blur-xl border-red-500/20">
         <div className="flex flex-col items-center text-center">
           <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mb-4">
             <AlertTriangle className="w-8 h-8 text-red-400" />
@@ -120,7 +122,9 @@ export default function VideoDetails() {
           <Button
             variant="outline"
             onClick={() => navigate('/dashboard')}
-            className="border-white/10 hover:bg-white/5"
+            className="border-red-500/20 hover:bg-red-500/10"
+            aria-label="Back to Dashboard"
+            title="Back to Dashboard"
           >
             Back to Dashboard
           </Button>
@@ -136,6 +140,8 @@ export default function VideoDetails() {
           variant="ghost"
           onClick={() => navigate('/dashboard')}
           className="text-slate-400 hover:text-white"
+          aria-label="Back to Dashboard"
+          title="Back to Dashboard"
         >
           <ArrowLeft className="w-4 h-4 mr-2" />
           Back to Dashboard
@@ -248,69 +254,153 @@ export default function VideoDetails() {
   }
 
   return (
-    <div className="space-y-6">
-      <Button
-        variant="ghost"
-        onClick={() => navigate('/dashboard')}
-        className="text-slate-400 hover:text-white"
-      >
-        <ArrowLeft className="w-4 h-4 mr-2" />
-        Back to Dashboard
-      </Button>
+    <div className="min-h-screen bg-gradient-to-b from-slate-950 to-slate-900 pb-12">
+      {/* Header with navigation and actions */}
+      <div className="sticky top-0 z-10 backdrop-blur-xl bg-slate-950/80 border-b border-slate-800/50 px-4 py-3">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <Button
+            variant="ghost"
+            onClick={() => navigate('/dashboard')}
+            className="text-slate-300 hover:text-white hover:bg-slate-800/50 transition-all duration-200 rounded-full"
+            aria-label="Back to Dashboard"
+            title="Back to Dashboard"
+          >
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back to Dashboard
+          </Button>
 
-      <div className="space-y-6">
-        <h1 className="text-2xl font-bold tracking-tight text-white bg-clip-text text-transparent bg-gradient-to-r from-violet-400 to-fuchsia-400">
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              className="border-slate-700 text-slate-300 hover:bg-slate-800 hover:border-slate-600 transition-all duration-200 rounded-full px-4"
+              onClick={() => handleVideoAction("share")}
+              aria-label="Share Video"
+              title="Share Video"
+            >
+              <Share2 className="w-4 h-4 mr-2" /> Share
+            </Button>
+            <Button
+              className="bg-violet-600 hover:bg-violet-700 text-white transition-all duration-200 rounded-full px-4"
+              onClick={() => handleVideoAction("download")}
+              aria-label="Download Video"
+              title="Download Video"
+            >
+              <Download className="w-4 h-4 mr-2" /> Download
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-4 pt-8">
+        {/* Video title */}
+        <h1 className="text-2xl md:text-3xl font-bold text-white mb-6 tracking-tight">
           {video.file_name}
         </h1>
 
-        <Card className="bg-black/40 backdrop-blur-xl border-slate-800 overflow-hidden">
-          <VideoPlayer
-            playbackInfo={playbackInfo}
-            className="aspect-video"
-          />
-        </Card>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Left column - Video player */}
+          <div className="lg:col-span-2">
+            <div className="rounded-2xl overflow-hidden bg-slate-950 border border-slate-800/50 shadow-xl shadow-violet-900/10">
+              <VideoPlayer
+                playbackInfo={playbackInfo}
+                className="aspect-video w-full"
+              />
+            </div>
+          </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className="p-4 bg-black/20 backdrop-blur-sm border-slate-800">
-            <p className="text-sm font-medium text-slate-400 mb-1">Resolution</p>
-            <p className="text-white font-semibold tracking-wide">
-              {Object.keys(playbackInfo.qualities)[0]}
-            </p>
-          </Card>
-          <Card className="p-4 bg-black/20 backdrop-blur-sm border-slate-800">
-            <p className="text-sm font-medium text-slate-400 mb-1">Size</p>
-            <p className="text-white font-semibold tracking-wide">
-              {Math.round(video.file_size / (1024 * 1024))} MB
-            </p>
-          </Card>
-          <Card className="p-4 bg-black/20 backdrop-blur-sm border-slate-800">
-            <p className="text-sm font-medium text-slate-400 mb-1">Duration</p>
-            <p className="text-white font-semibold tracking-wide">
-              {Math.floor(video.duration / 60)}:{String(Math.floor(video.duration % 60)).padStart(2, '0')}
-            </p>
-          </Card>
-          <Card className="p-4 bg-black/20 backdrop-blur-sm border-slate-800">
-            <p className="text-sm font-medium text-slate-400 mb-1">Uploaded</p>
-            <p className="text-white font-semibold tracking-wide">
-              {new Date(video.uploaded_at).toLocaleDateString()}
-            </p>
-          </Card>
-        </div>
+          {/* Right column - Video details */}
+          <div className="space-y-6">
+            {/* Video metadata card */}
+            <div className="rounded-2xl overflow-hidden bg-gradient-to-br from-violet-800/20 to-fuchsia-800/20 backdrop-blur-xl border border-violet-500/20 shadow-lg">
+              <div className="p-6">
+                <h2 className="text-xl font-semibold text-white mb-5 flex items-center">
+                  <VideoIcon className="w-5 h-5 mr-2 text-violet-400" />
+                  Video Details
+                </h2>
 
-        <div className="flex gap-4">
-          <Button
-            className="bg-violet-600 hover:bg-violet-700 font-medium tracking-wide"
-            onClick={() => handleVideoAction("download")}
-          >
-            <Download className="w-4 h-4 mr-2" /> Download
-          </Button>
-          <Button
-            variant="outline"
-            className="border-slate-700 font-medium tracking-wide"
-            onClick={() => handleVideoAction("share")}
-          >
-            <Share2 className="w-4 h-4 mr-2" /> Share
-          </Button>
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-slate-400">Resolution</p>
+                    <p className="text-white text-lg font-semibold">
+                      {Object.keys(playbackInfo.qualities)[0]}
+                    </p>
+                  </div>
+
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-slate-400">Size</p>
+                    <p className="text-white text-lg font-semibold">
+                      {Math.round(video.file_size / (1024 * 1024))} MB
+                    </p>
+                  </div>
+
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-slate-400">Duration</p>
+                    <p className="text-white text-lg font-semibold flex items-center">
+                      <Clock className="w-4 h-4 mr-2 text-violet-400" />
+                      {Math.floor(video.duration / 60)}:{String(Math.floor(video.duration % 60)).padStart(2, '0')}
+                    </p>
+                  </div>
+
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-slate-400">Uploaded</p>
+                    <p className="text-white text-lg font-semibold">
+                      {new Date(video.uploaded_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Technical details card */}
+            <div className="rounded-2xl overflow-hidden bg-slate-900/50 backdrop-blur-xl border border-slate-800/50 shadow-lg">
+              <div className="p-6">
+                <h2 className="text-xl font-semibold text-white mb-5 flex items-center">
+                  <SlidersHorizontal className="w-5 h-5 mr-2 text-violet-400" />
+                  Technical Information
+                </h2>
+
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-xs font-medium text-slate-400 mb-1">Video ID</p>
+                    <div className="bg-slate-800/50 rounded-lg p-2 overflow-x-auto">
+                      <p className="text-violet-300 font-mono text-sm">{video.video_id}</p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-medium text-slate-400 mb-1">Format</p>
+                    <p className="text-white bg-slate-800/50 rounded-lg p-2 inline-block px-3">
+                      {playbackInfo.format || 'MP4'}
+                    </p>
+                  </div>
+
+                  {playbackInfo.subtitles && playbackInfo.subtitles.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium text-slate-400 mb-1">Subtitles</p>
+                      <div className="flex flex-wrap gap-2">
+                        {playbackInfo.subtitles.map((subtitle, index) => (
+                          <span key={index} className="bg-slate-800/50 text-white rounded-full px-3 py-1 text-sm">
+                            {subtitle}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <p className="text-xs font-medium text-slate-400 mb-1">Available Qualities</p>
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      {Object.keys(playbackInfo.qualities).map((quality, index) => (
+                        <span key={index} className="bg-violet-800/30 text-white rounded-full px-3 py-1 text-sm border border-violet-500/20">
+                          {quality}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

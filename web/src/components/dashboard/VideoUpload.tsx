@@ -45,7 +45,6 @@ export default function VideoUpload() {
       video.onloadedmetadata = () => {
         window.URL.revokeObjectURL(video.src);
         const durationInSeconds = Math.round(video.duration);
-        console.log('Video duration:', durationInSeconds, 'seconds');
         resolve(durationInSeconds);
       };
 
@@ -119,8 +118,6 @@ export default function VideoUpload() {
       setStatus('uploading');
       setError(null);
 
-      console.log('Current duration:', duration);
-
       // Step 1: Get pre-signed URL
       const presignedData = await videoApi.getUploadUrl({
         name: file.name,
@@ -139,7 +136,6 @@ export default function VideoUpload() {
 
       xhr.onload = async () => {
         try {
-          console.log('Upload response:', xhr.status, xhr.response);
           // S3 returns 200 for successful uploads
           if (xhr.status === 200) {
             setStatus('in_progress');
@@ -160,8 +156,6 @@ export default function VideoUpload() {
                 output_formats: uploadSettings?.outputFormats || ["hls"],
                 enable_per_title_encoding: uploadSettings?.enablePerTitleEncoding || false
               };
-
-              console.log('Creating job with params:', jobParams);
 
               await videoApi.createJob(jobParams);
 
@@ -191,7 +185,6 @@ export default function VideoUpload() {
       };
 
       xhr.onabort = () => {
-        console.log('Upload aborted');
         setStatus('error');
         setError('Upload was aborted');
       };
@@ -210,10 +203,6 @@ export default function VideoUpload() {
       // Add error handling for CORS issues
       xhr.withCredentials = false; // Important for CORS with presigned URLs
 
-      // Log the actual request
-      console.log('Uploading to:', presignedData.presignUrl);
-      console.log('Content-Type:', file.type);
-      console.log('File size:', file.size);
 
       // Send the file
       xhr.send(file);
@@ -332,10 +321,10 @@ export default function VideoUpload() {
                       <Settings className="w-4 h-4 mr-2" />
                       Configure Settings
                     </Button>
-                    
+
                     <Button
-                      className={`flex-1 h-11 ${uploadSettings 
-                        ? 'bg-indigo-600 hover:bg-indigo-500' 
+                      className={`flex-1 h-11 ${uploadSettings
+                        ? 'bg-indigo-600 hover:bg-indigo-500'
                         : 'bg-gray-700 cursor-not-allowed'}`}
                       onClick={handleUpload}
                       disabled={!uploadSettings}

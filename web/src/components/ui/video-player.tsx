@@ -51,21 +51,21 @@ export function VideoPlayer({ playbackInfo, className = "" }: VideoPlayerProps) 
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const [availableQualities, setAvailableQualities] = useState<string[]>([]);
   const [currentSrc, setCurrentSrc] = useState<string>("");
+  const [playerQualities, setPlayerQualities] = useState<string[]>([]);
 
-  // Get the HLS URL from the highest quality available
+
   const getPlaybackUrl = () => {
     const qualities = Object.values(playbackInfo.qualities);
     if (qualities.length === 0) return "";
 
-    // First check if "master" quality exists
-    console.log(playbackInfo.qualities);
+
     const masterQuality = playbackInfo.qualities["master"];
     if (masterQuality && masterQuality.urls.hls) {
       return masterQuality.urls.hls;
     }
 
-    // If no master quality, sort by resolution and return the highest
-    // Sort by resolution (assuming resolution is in format "1080p", "720p", etc.)
+
+
     const sortedQualities = qualities.sort((a, b) => {
       const aRes = parseInt(a.resolution);
       const bRes = parseInt(b.resolution);
@@ -75,81 +75,170 @@ export function VideoPlayer({ playbackInfo, className = "" }: VideoPlayerProps) 
     return sortedQualities[0].urls.hls;
   };
 
-  // Get quality URL based on selected quality
+
   const getQualityUrl = (quality: string) => {
     if (quality === "auto") {
       return getPlaybackUrl();
     }
-    
+
     const qualityObj = playbackInfo.qualities[quality];
     return qualityObj?.urls.hls || getPlaybackUrl();
   };
 
-  // Change playback quality
+
   const changeQuality = (quality: string) => {
     if (quality === selectedQuality) return;
-    
-    // Store current playback state
+
     let currentTime = 0;
     let isPaused = true;
-    
+
     if (player.current) {
       currentTime = player.current.currentTime;
       isPaused = player.current.paused;
+
+      if (player.current.qualities && typeof player.current.qualities === "object") {
+        try {
+          // Use a public method to retrieve qualities safely
+          const qualityItems = player.current.qualities.toArray?.() || [];
+
+          if (Array.isArray(qualityItems)) {
+            const qualityItem = qualityItems.find(
+              (item) => `${item.height}p` === quality || item.height.toString() === quality
+            );
+
+            if (qualityItem) {
+              qualityItem.selected = true;
+              setSelectedQuality(quality);
+              return;
+            }
+          }
+        } catch (error) {
+          console.error("Error changing quality through player API:", error);
+        }
+      }
     }
-    
-    // Update the selected quality state
+
+    // If the quality was not changed through the player API, update manually
     setSelectedQuality(quality);
-    
-    // Update the source URL state which will trigger a re-render of the MediaPlayer
+
+    // Generate a new source URL for the selected quality
     const newSrc = getQualityUrl(quality);
     setCurrentSrc(newSrc);
-    
-    // After the source changes and media loads, restore playback state
+
     if (player.current) {
       const handleLoadedMetadata = () => {
         if (player.current) {
           player.current.currentTime = currentTime;
           if (!isPaused) {
-            player.current.play().catch(error => {
+            player.current.play().catch((error) => {
               console.error("Error playing video after quality change:", error);
             });
           }
         }
       };
-      
+
+      // Listen for metadata load event to restore playback position
       player.current.addEventListener("loadedmetadata", handleLoadedMetadata, { once: true });
     }
   };
 
-  // Change playback speed
+
+
   const changePlaybackSpeed = (speed: number) => {
     setPlaybackSpeed(speed);
-    
+
     if (player.current) {
       player.current.playbackRate = speed;
     }
   };
 
   useEffect(() => {
-    // Subscribe to state updates.
+
     return player.current!.subscribe(({ viewType }) => {
       setViewType(viewType);
     });
   }, []);
 
-  // Set up available qualities
-  useEffect(() => {
-    const qualities = Object.keys(playbackInfo.qualities);
-    // Add "auto" option and filter out "master"
-    const filteredQualities = ["auto", ...qualities.filter(q => q !== "master")];
-    setAvailableQualities(filteredQualities);
-    
-    // Initialize current source
-    setCurrentSrc(getPlaybackUrl());
-  }, [playbackInfo]);
 
-  // Set initial playback speed when player is ready
+  useEffect(() => {
+    console.log(player.current?.qualities)
+    const checkPlayerQualities = () => {
+      if (player.current?.qualities) {
+        try {
+          // Use a public method if available (e.g., `toArray()` or `getAvailableQualities()`)
+          const qualityItems = player.current.qualities.toArray?.() || [];
+
+          if (Array.isArray(qualityItems)) {
+            const extractedQualities = qualityItems.map(item => `${item.height}p`);
+            const qualitiesWithAuto = ["auto", ...extractedQualities];
+
+            if (qualitiesWithAuto.length > 1) {
+              setPlayerQualities(qualitiesWithAuto);
+              return true;
+            }
+          }
+        } catch (error) {
+          console.error("Error accessing player qualities:", error);
+        }
+      }
+      return false;
+    };
+
+
+
+    const hasPlayerQualities = checkPlayerQualities();
+
+    if (!hasPlayerQualities) {
+
+      const qualities = Object.keys(playbackInfo.qualities);
+
+      const filteredQualities = ["auto", ...qualities.filter(q => q !== "master")];
+      setAvailableQualities(filteredQualities);
+    }
+
+
+    const intervalId = setInterval(() => {
+      const hasQualities = checkPlayerQualities();
+      if (hasQualities) {
+        clearInterval(intervalId);
+      }
+    }, 1000);
+
+
+    setCurrentSrc(getPlaybackUrl());
+
+    return () => clearInterval(intervalId);
+  }, [playbackInfo, player.current]);
+
+
+  useEffect(() => {
+    if (playerQualities.length > 0) {
+
+      const validQualities = playerQualities.filter(q => {
+
+        return q === "auto" ||
+          /^\d+p$/.test(q) ||
+          /^\d+x\d+$/.test(q) ||
+          /^(low|medium|high|hd|fullhd|ultrahd|4k)$/i.test(q);
+      });
+
+
+      if (validQualities.length > 0) {
+
+        const updatedQualities = validQualities.includes("auto")
+          ? validQualities
+          : ["auto", ...validQualities];
+        setAvailableQualities(updatedQualities);
+      } else {
+
+        const manualQualities = Object.keys(playbackInfo.qualities);
+        const filteredManualQualities = ["auto", ...manualQualities.filter(q => q !== "master")];
+        setAvailableQualities(filteredManualQualities);
+      }
+    }
+  }, [playerQualities, playbackInfo]);
+
+
   useEffect(() => {
     if (player.current) {
       player.current.playbackRate = playbackSpeed;
@@ -160,28 +249,51 @@ export function VideoPlayer({ playbackInfo, className = "" }: VideoPlayerProps) 
     provider: MediaProviderAdapter | null,
     nativeEvent: MediaProviderChangeEvent
   ) {
-    // Configure HLS provider
+
     if (isHLSProvider(provider)) {
       provider.config = {
-        // Add any HLS.js config options if needed
+
         autoStartLoad: true,
         enableWorker: true,
       };
     }
   }
 
-  function onCanPlay(
-    detail: MediaCanPlayDetail,
-    nativeEvent: MediaCanPlayEvent
-  ) {
-    console.log("Video can play");
+  function onCanPlay(detail: MediaCanPlayDetail, nativeEvent: MediaCanPlayEvent) {
+    if (player.current?.qualities) {
+      try {
+        // Use a public method like `toArray()` instead of accessing `items` directly
+        const qualityItems = player.current.qualities.toArray?.() || [];
+
+        if (Array.isArray(qualityItems)) {
+          const extractedQualities = qualityItems.map((item) => `${item.height}p`);
+          const qualitiesWithAuto = ["auto", ...extractedQualities];
+
+          if (qualitiesWithAuto.length > 1) {
+            setPlayerQualities(qualitiesWithAuto);
+
+            // Find the currently selected quality
+            const selectedItem = qualityItems.find((item) => item.selected);
+            if (selectedItem) {
+              setSelectedQuality(`${selectedItem.height}p`);
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error accessing player qualities in onCanPlay:", error);
+      }
+    }
   }
+
 
   const playbackUrl = getPlaybackUrl();
 
   if (!playbackUrl) {
     return <div>No playback URL available</div>;
   }
+
+
+  const displayQualities = playerQualities.length > 0 ? playerQualities : availableQualities;
 
   return (
     <MediaPlayer
@@ -192,6 +304,7 @@ export function VideoPlayer({ playbackInfo, className = "" }: VideoPlayerProps) 
       onProviderChange={onProviderChange}
       onCanPlay={onCanPlay}
       ref={player}
+      style={{ maxWidth: '100%', height: 'auto' }}
     >
       <MediaProvider>
         {playbackInfo.thumbnail && (
@@ -203,13 +316,15 @@ export function VideoPlayer({ playbackInfo, className = "" }: VideoPlayerProps) 
         )}
       </MediaProvider>
 
-      <VideoLayout 
-        thumbnails="" 
-        qualities={availableQualities}
+      <VideoLayout
+        thumbnails=""
+        qualities={displayQualities}
         selectedQuality={selectedQuality}
         onQualityChange={changeQuality}
         playbackSpeed={playbackSpeed}
         onPlaybackSpeedChange={changePlaybackSpeed}
+        qualityTooltip="Select video quality"
+        speedTooltip="Select playback speed"
       />
     </MediaPlayer>
   );
