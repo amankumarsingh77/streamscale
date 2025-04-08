@@ -20,9 +20,12 @@ import {
   Settings,
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { VideoUploadSettings, VideoUploadSettings as IVideoUploadSettings } from "./VideoUploadSettings";
+import {
+  VideoUploadSettings,
+  VideoUploadSettings as IVideoUploadSettings,
+} from "./VideoUploadSettings";
 
-type UploadStatus = 'idle' | 'uploading' | 'in_progress' | 'complete' | 'error';
+type UploadStatus = "idle" | "uploading" | "in_progress" | "complete" | "error";
 
 export default function VideoUpload() {
   const navigate = useNavigate();
@@ -30,17 +33,18 @@ export default function VideoUpload() {
   const [duration, setDuration] = useState<number>(0);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [status, setStatus] = useState<UploadStatus>('idle');
+  const [status, setStatus] = useState<UploadStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [uploadSettings, setUploadSettings] = useState<IVideoUploadSettings | null>(null);
+  const [uploadSettings, setUploadSettings] =
+    useState<IVideoUploadSettings | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const getVideoDuration = (file: File): Promise<number> => {
     return new Promise((resolve, reject) => {
-      const video = document.createElement('video');
-      video.preload = 'metadata';
+      const video = document.createElement("video");
+      video.preload = "metadata";
 
       video.onloadedmetadata = () => {
         window.URL.revokeObjectURL(video.src);
@@ -49,7 +53,7 @@ export default function VideoUpload() {
       };
 
       video.onerror = () => {
-        reject('Error loading video file');
+        reject("Error loading video file");
       };
 
       video.src = URL.createObjectURL(file);
@@ -71,34 +75,34 @@ export default function VideoUpload() {
     setIsDragging(false);
 
     const droppedFile = e.dataTransfer.files[0];
-    if (droppedFile && droppedFile.type.startsWith('video/')) {
+    if (droppedFile && droppedFile.type.startsWith("video/")) {
       try {
         const videoDuration = await getVideoDuration(droppedFile);
         setDuration(videoDuration);
         setFile(droppedFile);
         setError(null);
       } catch (err) {
-        setError('Error reading video file');
+        setError("Error reading video file");
       }
     } else {
-      setError('Please upload a valid video file');
+      setError("Please upload a valid video file");
     }
   }, []);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
-      if (selectedFile.type.startsWith('video/')) {
+      if (selectedFile.type.startsWith("video/")) {
         try {
           const videoDuration = await getVideoDuration(selectedFile);
           setDuration(videoDuration);
           setFile(selectedFile);
           setError(null);
         } catch (err) {
-          setError('Error reading video file');
+          setError("Error reading video file");
         }
       } else {
-        setError('Please upload a valid video file');
+        setError("Please upload a valid video file");
       }
     }
   };
@@ -115,7 +119,7 @@ export default function VideoUpload() {
     if (!file) return;
 
     try {
-      setStatus('uploading');
+      setStatus("uploading");
       setError(null);
 
       // Step 1: Get pre-signed URL
@@ -138,79 +142,86 @@ export default function VideoUpload() {
         try {
           // S3 returns 200 for successful uploads
           if (xhr.status === 200) {
-            setStatus('in_progress');
+            setStatus("in_progress");
 
             try {
               const jobParams = {
                 filename: file.name,
                 file_size: file.size,
                 duration: duration,
-                format: file.type.split('/')[1],
+                format: file.type.split("/")[1],
                 codec: uploadSettings?.codec || "h264",
                 qualities: uploadSettings?.qualities || [
                   {
                     resolution: "1080p",
-                    bitrate: 5000000
-                  }
+                    bitrate: 5000000,
+                  },
                 ],
                 output_formats: uploadSettings?.outputFormats || ["hls"],
-                enable_per_title_encoding: uploadSettings?.enablePerTitleEncoding || false
+                enable_per_title_encoding:
+                  uploadSettings?.enablePerTitleEncoding || false,
               };
 
               await videoApi.createJob(jobParams);
 
-              setStatus('complete');
+              setStatus("complete");
               setTimeout(() => {
-                navigate('/dashboard');
+                navigate("/dashboard");
               }, 2000);
             } catch (error) {
-              console.error('Error in job creation:', error);
-              setStatus('error');
-              setError(error instanceof Error ? error.message : 'Failed to create transcoding job');
+              console.error("Error in job creation:", error);
+              setStatus("error");
+              setError(
+                error instanceof Error
+                  ? error.message
+                  : "Failed to create transcoding job"
+              );
             }
           } else {
             throw new Error(`Upload failed with status: ${xhr.status}`);
           }
         } catch (error) {
-          console.error('Error in onload:', error);
-          setStatus('error');
-          setError(error instanceof Error ? error.message : 'Failed to process upload');
+          console.error("Error in onload:", error);
+          setStatus("error");
+          setError(
+            error instanceof Error ? error.message : "Failed to process upload"
+          );
         }
       };
 
       xhr.onerror = (error) => {
-        console.error('XHR Error:', error);
-        setStatus('error');
-        setError('Network error occurred during upload');
+        console.error("XHR Error:", error);
+        setStatus("error");
+        setError("Network error occurred during upload");
       };
 
       xhr.onabort = () => {
-        setStatus('error');
-        setError('Upload was aborted');
+        setStatus("error");
+        setError("Upload was aborted");
       };
 
       if (!presignedData.presignUrl) {
-        throw new Error('No upload URL provided');
+        throw new Error("No upload URL provided");
       }
 
-      xhr.open('PUT', presignedData.presignUrl, true);
+      xhr.open("PUT", presignedData.presignUrl, true);
 
       // Set required headers for S3/R2
-      xhr.setRequestHeader('Content-Type', file.type);
+      xhr.setRequestHeader("Content-Type", file.type);
       // Remove the x-amz-acl header as it might not be needed for R2
       // xhr.setRequestHeader('x-amz-acl', 'private');
 
       // Add error handling for CORS issues
       xhr.withCredentials = false; // Important for CORS with presigned URLs
 
-
       // Send the file
       xhr.send(file);
-
     } catch (err) {
-      console.error('Upload error:', err);
-      setStatus('error');
-      setError(err instanceof Error ? err.message : 'An error occurred during upload');
+      console.error("Upload error:", err);
+      setStatus("error");
+      setError(
+        err instanceof Error ? err.message : "An error occurred during upload"
+      );
     }
   };
 
@@ -222,11 +233,13 @@ export default function VideoUpload() {
             <span className="text-white">Upload</span>
             <span className="text-indigo-400">New Video</span>
           </h1>
-          <p className="text-gray-400 text-sm">Upload and process your video in one go</p>
+          <p className="text-gray-400 text-sm">
+            Upload and process your video in one go
+          </p>
         </div>
         <Button
           variant="link"
-          onClick={() => navigate('/dashboard')}
+          onClick={() => navigate("/dashboard")}
           className="text-gray-400 hover:text-white flex items-center gap-2"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -238,19 +251,23 @@ export default function VideoUpload() {
         {/* Main Upload Area */}
         <div className="lg:col-span-2">
           {error && (
-            <Alert variant="destructive" className="mb-6 bg-red-500/10 text-red-400 border-red-500/20">
+            <Alert
+              variant="destructive"
+              className="mb-6 bg-red-500/10 text-red-400 border-red-500/20"
+            >
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
 
           <Card className="bg-gradient-to-b from-gray-900 to-gray-950 border border-dashed border-gray-800 overflow-hidden shadow-xl">
-            {status === 'idle' && !file && (
+            {status === "idle" && !file && (
               <div
-                className={`relative transition-colors ${isDragging
-                  ? 'bg-indigo-500/5 border-indigo-400'
-                  : 'hover:border-indigo-500/50'
-                  }`}
+                className={`relative transition-colors ${
+                  isDragging
+                    ? "bg-indigo-500/5 border-indigo-400"
+                    : "hover:border-indigo-500/50"
+                }`}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
@@ -262,7 +279,10 @@ export default function VideoUpload() {
                   onChange={handleFileSelect}
                   className="hidden"
                 />
-                <div className="flex flex-col items-center justify-center py-32 cursor-pointer" onClick={handleChooseVideo}>
+                <div
+                  className="flex flex-col items-center justify-center py-32 cursor-pointer"
+                  onClick={handleChooseVideo}
+                >
                   <div className="w-24 h-24 rounded-2xl bg-indigo-500/10 flex items-center justify-center mb-6 border border-indigo-500/20">
                     <FileVideo className="w-12 h-12 text-indigo-400" />
                   </div>
@@ -286,7 +306,7 @@ export default function VideoUpload() {
               </div>
             )}
 
-            {file && status === 'idle' && (
+            {file && status === "idle" && (
               <div className="p-6 space-y-6">
                 <div className="p-5 bg-indigo-500/5 border border-indigo-500/20 rounded-lg flex items-start justify-between">
                   <div className="flex items-start gap-4">
@@ -294,11 +314,18 @@ export default function VideoUpload() {
                       <FileVideo className="w-7 h-7 text-indigo-400" />
                     </div>
                     <div>
-                      <p className="font-medium text-white mb-1 text-lg">{file.name}</p>
+                      <p className="font-medium text-white mb-1 text-lg">
+                        {file.name}
+                      </p>
                       <div className="flex items-center gap-3 text-sm">
-                        <span className="text-gray-400">{(file.size / (1024 * 1024)).toFixed(2)} MB</span>
+                        <span className="text-gray-400">
+                          {(file.size / (1024 * 1024)).toFixed(2)} MB
+                        </span>
                         <span className="text-gray-600">•</span>
-                        <span className="text-gray-400">{Math.floor(duration / 60)}:{String(Math.floor(duration % 60)).padStart(2, '0')}</span>
+                        <span className="text-gray-400">
+                          {Math.floor(duration / 60)}:
+                          {String(Math.floor(duration % 60)).padStart(2, "0")}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -323,9 +350,11 @@ export default function VideoUpload() {
                     </Button>
 
                     <Button
-                      className={`flex-1 h-11 ${uploadSettings
-                        ? 'bg-indigo-600 hover:bg-indigo-500'
-                        : 'bg-gray-700 cursor-not-allowed'}`}
+                      className={`flex-1 h-11 ${
+                        uploadSettings
+                          ? "bg-indigo-600 hover:bg-indigo-500"
+                          : "bg-gray-700 cursor-not-allowed"
+                      }`}
                       onClick={handleUpload}
                       disabled={!uploadSettings}
                     >
@@ -344,7 +373,9 @@ export default function VideoUpload() {
                   ) : (
                     <div className="p-4 bg-gray-800/50 border border-gray-700 rounded-lg">
                       <div className="flex items-center justify-between mb-3">
-                        <h4 className="text-sm font-medium text-white">Selected Settings</h4>
+                        <h4 className="text-sm font-medium text-white">
+                          Selected Settings
+                        </h4>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -357,24 +388,38 @@ export default function VideoUpload() {
                       <div className="grid grid-cols-2 gap-x-4 gap-y-2">
                         <div className="flex items-center justify-between">
                           <span className="text-xs text-gray-400">Codec:</span>
-                          <span className="text-xs font-medium text-white">{uploadSettings.codec.toUpperCase()}</span>
+                          <span className="text-xs font-medium text-white">
+                            {uploadSettings.codec.toUpperCase()}
+                          </span>
                         </div>
                         <div className="flex items-center justify-between">
-                          <span className="text-xs text-gray-400">Qualities:</span>
+                          <span className="text-xs text-gray-400">
+                            Qualities:
+                          </span>
                           <span className="text-xs font-medium text-white">
-                            {uploadSettings.qualities.filter(q => q.enabled).length} selected
+                            {
+                              uploadSettings.qualities.filter((q) => q.enabled)
+                                .length
+                            }{" "}
+                            selected
                           </span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-xs text-gray-400">Format:</span>
                           <span className="text-xs font-medium text-white">
-                            {uploadSettings.outputFormats.map(f => f.toUpperCase()).join(', ')}
+                            {uploadSettings.outputFormats
+                              .map((f) => f.toUpperCase())
+                              .join(", ")}
                           </span>
                         </div>
                         <div className="flex items-center justify-between">
-                          <span className="text-xs text-gray-400">Per-Title:</span>
+                          <span className="text-xs text-gray-400">
+                            Per-Title:
+                          </span>
                           <span className="text-xs font-medium text-white">
-                            {uploadSettings.enablePerTitleEncoding ? 'Enabled' : 'Disabled'}
+                            {uploadSettings.enablePerTitleEncoding
+                              ? "Enabled"
+                              : "Disabled"}
                           </span>
                         </div>
                       </div>
@@ -384,27 +429,39 @@ export default function VideoUpload() {
               </div>
             )}
 
-            {status === 'uploading' && (
+            {status === "uploading" && (
               <div className="p-6 space-y-6">
                 <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-lg font-medium text-white">Uploading Video</h3>
-                  <span className="text-sm text-indigo-400">{Math.round(uploadProgress)}%</span>
+                  <h3 className="text-lg font-medium text-white">
+                    Uploading Video
+                  </h3>
+                  <span className="text-sm text-indigo-400">
+                    {Math.round(uploadProgress)}%
+                  </span>
                 </div>
-                <Progress value={uploadProgress} className="h-2 bg-gray-800 [&>div]:bg-indigo-500" />
-                <p className="text-sm text-gray-400 text-center">Please don't close this window during upload</p>
+                <Progress
+                  value={uploadProgress}
+                  className="h-2 bg-gray-800 [&>div]:bg-indigo-500"
+                />
+                <p className="text-sm text-gray-400 text-center">
+                  Please don't close this window during upload
+                </p>
               </div>
             )}
 
-            {status === 'in_progress' && (
+            {status === "in_progress" && (
               <div className="p-6 space-y-6">
                 <div className="flex items-center justify-center mb-4">
                   <div className="w-16 h-16 rounded-full bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20">
                     <Zap className="w-8 h-8 text-indigo-400" />
                   </div>
                 </div>
-                <h3 className="text-xl font-medium text-white text-center">Processing Your Video</h3>
+                <h3 className="text-xl font-medium text-white text-center">
+                  Processing Your Video
+                </h3>
                 <p className="text-sm text-gray-400 text-center">
-                  We're encoding your video for optimal playback. This may take a few minutes.
+                  We're encoding your video for optimal playback. This may take
+                  a few minutes.
                 </p>
                 <div className="flex justify-center">
                   <div className="w-10 h-10 relative">
@@ -414,21 +471,24 @@ export default function VideoUpload() {
               </div>
             )}
 
-            {status === 'complete' && (
+            {status === "complete" && (
               <div className="p-6 space-y-6">
                 <div className="flex items-center justify-center mb-4">
                   <div className="w-16 h-16 rounded-full bg-green-500/10 flex items-center justify-center border border-green-500/20">
                     <Check className="w-8 h-8 text-green-400" />
                   </div>
                 </div>
-                <h3 className="text-xl font-medium text-white text-center">Upload Complete!</h3>
+                <h3 className="text-xl font-medium text-white text-center">
+                  Upload Complete!
+                </h3>
                 <p className="text-sm text-gray-400 text-center">
-                  Your video has been successfully processed and is ready to view.
+                  Your video has been successfully processed and is ready to
+                  view.
                 </p>
                 <div className="flex justify-center">
                   <Button
                     className="bg-indigo-600 hover:bg-indigo-500"
-                    onClick={() => navigate('/dashboard')}
+                    onClick={() => navigate("/dashboard")}
                   >
                     Go to Dashboard
                   </Button>
@@ -436,22 +496,25 @@ export default function VideoUpload() {
               </div>
             )}
 
-            {status === 'error' && (
+            {status === "error" && (
               <div className="p-6 space-y-6">
                 <div className="flex items-center justify-center mb-4">
                   <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center border border-red-500/20">
                     <AlertCircle className="w-8 h-8 text-red-400" />
                   </div>
                 </div>
-                <h3 className="text-xl font-medium text-white text-center">Upload Failed</h3>
+                <h3 className="text-xl font-medium text-white text-center">
+                  Upload Failed
+                </h3>
                 <p className="text-sm text-red-400 text-center">
-                  {error || "An error occurred during upload. Please try again."}
+                  {error ||
+                    "An error occurred during upload. Please try again."}
                 </p>
                 <div className="flex justify-center">
                   <Button
                     className="bg-indigo-600 hover:bg-indigo-500"
                     onClick={() => {
-                      setStatus('idle');
+                      setStatus("idle");
                       setError(null);
                     }}
                   >
@@ -476,8 +539,12 @@ export default function VideoUpload() {
                   <Check className="w-3 h-3 text-indigo-400" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-white">Supported Formats</p>
-                  <p className="text-xs text-gray-400">MP4, MOV, AVI, MKV (H.264/H.265)</p>
+                  <p className="text-sm font-medium text-white">
+                    Supported Formats
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    MP4, MOV, AVI, MKV (H.264/H.265)
+                  </p>
                 </div>
               </div>
               <div className="flex items-start gap-3">
@@ -485,7 +552,9 @@ export default function VideoUpload() {
                   <Check className="w-3 h-3 text-indigo-400" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-white">Maximum File Size</p>
+                  <p className="text-sm font-medium text-white">
+                    Maximum File Size
+                  </p>
                   <p className="text-xs text-gray-400">Up to 2GB per video</p>
                 </div>
               </div>
@@ -503,8 +572,12 @@ export default function VideoUpload() {
                   <Check className="w-3 h-3 text-indigo-400" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-white">Processing Time</p>
-                  <p className="text-xs text-gray-400">2-5 minutes for most videos</p>
+                  <p className="text-sm font-medium text-white">
+                    Processing Time
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    2-5 minutes for most videos
+                  </p>
                 </div>
               </div>
             </div>
