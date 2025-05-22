@@ -88,7 +88,6 @@ export default function DashboardAnalytics() {
       try {
         const response = await videoApi.listVideos(1, 5);
 
-        // Simulate analytics data
         setAnalytics({
           totalVideos: response.total_count || 0,
           totalViews: Math.floor(Math.random() * 10000),
@@ -179,23 +178,25 @@ export default function DashboardAnalytics() {
 
       {/* Welcome Card */}
       {analytics.totalVideos === 0 && (
-        <Card className="bg-gradient-to-r from-indigo-500/10 to-violet-500/10 border-indigo-500/20 shadow-lg mb-6">
-          <CardContent className="p-6">
+        <Card className="bg-gradient-to-br from-[#2c245d] via-[#3b2a82] to-[#4b2071] border border-violet-700/30 shadow-xl rounded-2xl mb-8">
+          <CardContent className="p-8">
             <div className="flex flex-col md:flex-row items-center gap-6">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500/20 to-violet-500/20 flex items-center justify-center border border-indigo-500/30">
-                <FileVideo className="w-8 h-8 text-indigo-400" />
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500/40 to-violet-500/40 flex items-center justify-center border border-indigo-400/30 shadow-lg">
+                <FileVideo className="w-8 h-8 text-indigo-300" />
               </div>
               <div className="flex-1 text-center md:text-left">
-                <h3 className="text-xl font-medium text-white mb-2">
-                  Welcome to StreamScale, {user?.name}!
+                <h3 className="text-2xl font-semibold text-white mb-2">
+                  Welcome to{" "}
+                  <span className="text-indigo-300">StreamScale</span>
+                  {user?.name ? `, ${user.name}` : ""}!
                 </h3>
-                <p className="text-slate-400 mb-4">
-                  Get started by uploading your first video to see analytics and
-                  insights.
+                <p className="text-slate-300 text-sm mb-5 max-w-md mx-auto md:mx-0">
+                  Start by uploading a video — we'll handle the processing and
+                  streaming.
                 </p>
                 <Button
                   onClick={() => navigate("/dashboard/upload")}
-                  className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-medium"
+                  className="bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 text-white font-medium px-5 py-2 rounded-lg shadow-lg"
                 >
                   <Upload className="w-4 h-4 mr-2" />
                   Upload Your First Video

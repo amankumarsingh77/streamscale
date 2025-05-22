@@ -11,7 +11,8 @@ export default function SignupForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
-    name: "",
+    username: "",
+    fullname: "",
     email: "",
     password: "",
   });
@@ -22,17 +23,22 @@ export default function SignupForm() {
     setError(null);
 
     try {
-      const response = await authApi.register(formData.email, formData.password, formData.name);
-      // Store the token if returned
+      const response = await authApi.register(
+        formData.email,
+        formData.password,
+        formData.fullname,
+        formData.username
+      );
+
       if (response?.token) {
-        localStorage.setItem('token', response.token);
+        localStorage.setItem("token", response.token);
       }
-      // Log the user in automatically after successful registration
+
       await authApi.login(formData.email, formData.password);
-      // Redirect to dashboard with replace to prevent going back to signup
-      navigate('/dashboard', { replace: true });
+
+      navigate("/dashboard", { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create account');
+      setError(err instanceof Error ? err.message : "Failed to create account");
     } finally {
       setIsLoading(false);
     }
@@ -43,7 +49,7 @@ export default function SignupForm() {
       {/* Background Elements */}
       <div className="absolute inset-0 bg-[url('/grid-pattern.svg')] opacity-5" />
       <div className="absolute inset-0 bg-gradient-to-br from-violet-500/5 via-transparent to-fuchsia-500/5" />
-      
+
       <Card className="w-full max-w-lg bg-black/40 backdrop-blur-xl border-slate-800 p-8 relative">
         <div className="absolute inset-0 bg-gradient-to-br from-violet-500/10 via-transparent to-fuchsia-500/10 rounded-lg" />
         <div className="relative">
@@ -67,9 +73,24 @@ export default function SignupForm() {
                 <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 w-5 h-5" />
                 <Input
                   type="text"
+                  placeholder="User Name"
+                  value={formData.username}
+                  onChange={(e) =>
+                    setFormData({ ...formData, username: e.target.value })
+                  }
+                  className="pl-11 bg-black/20 border-slate-800 text-white"
+                  required
+                />
+              </div>
+              <div className="relative">
+                <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 w-5 h-5" />
+                <Input
+                  type="text"
                   placeholder="Full Name"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  value={formData.fullname}
+                  onChange={(e) =>
+                    setFormData({ ...formData, fullname: e.target.value })
+                  }
                   className="pl-11 bg-black/20 border-slate-800 text-white"
                   required
                 />
@@ -81,7 +102,9 @@ export default function SignupForm() {
                   type="email"
                   placeholder="Email"
                   value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, email: e.target.value })
+                  }
                   className="pl-11 bg-black/20 border-slate-800 text-white"
                   required
                 />
@@ -93,7 +116,9 @@ export default function SignupForm() {
                   type="password"
                   placeholder="Password"
                   value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, password: e.target.value })
+                  }
                   className="pl-11 bg-black/20 border-slate-800 text-white"
                   required
                 />
@@ -125,9 +150,9 @@ export default function SignupForm() {
           {/* Footer */}
           <div className="mt-6 text-center">
             <p className="text-slate-400">
-              Already have an account?{' '}
+              Already have an account?{" "}
               <button
-                onClick={() => navigate('/login')}
+                onClick={() => navigate("/login")}
                 className="text-violet-400 hover:text-violet-300 font-medium"
               >
                 Sign in
@@ -138,4 +163,4 @@ export default function SignupForm() {
       </Card>
     </div>
   );
-} 
+}

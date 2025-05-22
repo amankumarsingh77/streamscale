@@ -3,7 +3,15 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-import { ArrowRight, Mail, Lock, Loader2, Eye, EyeOff, AlertCircle } from "lucide-react";
+import {
+  ArrowRight,
+  Mail,
+  Lock,
+  Loader2,
+  Eye,
+  EyeOff,
+  AlertCircle,
+} from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { motion } from "framer-motion";
 
@@ -27,20 +35,22 @@ export default function LoginForm() {
       // Use the login function from auth context instead of direct API call
       await login(formData.email, formData.password);
       // After successful login, navigate to dashboard
-      navigate('/dashboard', { replace: true });
+      navigate("/dashboard", { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Invalid email or password');
+      setError(
+        err instanceof Error ? err.message : "Invalid email or password"
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
   const togglePasswordVisibility = () => {
-    setShowPassword(prev => !prev);
+    setShowPassword((prev) => !prev);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !isLoading) {
+    if (e.key === "Enter" && !isLoading) {
       handleSubmit(e);
     }
   };
@@ -52,10 +62,14 @@ export default function LoginForm() {
       <div className="absolute inset-0 bg-gradient-to-br from-violet-500/5 via-transparent to-fuchsia-500/5" />
 
       {/* Animated Glow Effects */}
-      <div className="absolute top-1/4 left-1/4 w-64 h-64 bg-violet-500/20 rounded-full blur-3xl animate-pulse"
-        style={{ animationDuration: '8s' }} />
-      <div className="absolute bottom-1/4 right-1/4 w-64 h-64 bg-fuchsia-500/20 rounded-full blur-3xl animate-pulse"
-        style={{ animationDuration: '10s' }} />
+      <div
+        className="absolute top-1/4 left-1/4 w-64 h-64 bg-violet-500/20 rounded-full blur-3xl animate-pulse"
+        style={{ animationDuration: "8s" }}
+      />
+      <div
+        className="absolute bottom-1/4 right-1/4 w-64 h-64 bg-fuchsia-500/20 rounded-full blur-3xl animate-pulse"
+        style={{ animationDuration: "10s" }}
+      />
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -66,11 +80,13 @@ export default function LoginForm() {
           <div className="absolute inset-0 bg-gradient-to-br from-violet-500/10 via-transparent to-fuchsia-500/10 rounded-lg" />
 
           {/* Subtle animated highlight */}
-          <div className="absolute -inset-1 bg-gradient-to-r from-violet-500/0 via-violet-500/20 to-fuchsia-500/0 blur-xl opacity-50"
+          <div
+            className="absolute -inset-1 bg-gradient-to-r from-violet-500/0 via-violet-500/20 to-fuchsia-500/0 blur-xl opacity-50"
             style={{
-              transform: 'translateX(-100%)',
-              animation: 'shimmer 5s infinite',
-            }} />
+              transform: "translateX(-100%)",
+              animation: "shimmer 5s infinite",
+            }}
+          />
 
           <div className="relative">
             {/* Logo */}
@@ -104,7 +120,9 @@ export default function LoginForm() {
                     type="email"
                     placeholder="Email"
                     value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    onChange={(e) =>
+                      setFormData({ ...formData, email: e.target.value })
+                    }
                     className="pl-11 bg-black/20 border-slate-800 text-white focus:border-violet-500 focus:ring-violet-500/20 transition-all"
                     required
                     aria-label="Email"
@@ -119,7 +137,9 @@ export default function LoginForm() {
                     type={showPassword ? "text" : "password"}
                     placeholder="Password"
                     value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    onChange={(e) =>
+                      setFormData({ ...formData, password: e.target.value })
+                    }
                     className="pl-11 pr-11 bg-black/20 border-slate-800 text-white focus:border-violet-500 focus:ring-violet-500/20 transition-all"
                     required
                     aria-label="Password"
@@ -131,11 +151,35 @@ export default function LoginForm() {
                     onClick={togglePasswordVisibility}
                     className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-white transition-colors"
                     tabIndex={0}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    aria-label={
+                      showPassword ? "Hide password" : "Show password"
+                    }
                   >
-                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    {showPassword ? (
+                      <EyeOff className="w-5 h-5" />
+                    ) : (
+                      <Eye className="w-5 h-5" />
+                    )}
                   </button>
                 </div>
+              </div>
+
+              {/* Demo Credentials Section */}
+              <div className="mt-6 p-4 rounded-lg bg-gradient-to-r from-violet-900/50 to-fuchsia-900/50 border border-violet-700 text-sm text-slate-300 font-mono space-y-1 select-text">
+                <p className="font-semibold text-violet-400 mb-1">
+                  Demo Credentials:
+                </p>
+                <p>
+                  <span className="text-violet-300">Email:</span>{" "}
+                  demo@streamscale.com
+                </p>
+                <p>
+                  <span className="text-violet-300">Password:</span>{" "}
+                  DemoPass123!
+                </p>
+                <p className="text-xs text-slate-500 mt-2 italic">
+                  * Use these to try the app quickly
+                </p>
               </div>
 
               {error && (
@@ -171,7 +215,12 @@ export default function LoginForm() {
                     id="remember"
                     className="rounded border-slate-700 bg-black/20 text-violet-500 focus:ring-violet-500/20"
                   />
-                  <label htmlFor="remember" className="text-slate-400 cursor-pointer">Remember me</label>
+                  <label
+                    htmlFor="remember"
+                    className="text-slate-400 cursor-pointer"
+                  >
+                    Remember me
+                  </label>
                 </div>
                 <button
                   type="button"
@@ -187,9 +236,9 @@ export default function LoginForm() {
             {/* Footer */}
             <div className="mt-8 text-center">
               <p className="text-slate-400">
-                Don't have an account?{' '}
+                Don't have an account?{" "}
                 <button
-                  onClick={() => navigate('/signup')}
+                  onClick={() => navigate("/signup")}
                   className="text-violet-400 hover:text-violet-300 font-medium transition-colors"
                   tabIndex={0}
                   aria-label="Sign up"
