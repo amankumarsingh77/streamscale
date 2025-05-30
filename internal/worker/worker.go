@@ -210,8 +210,10 @@ func (w *Worker) processJob(ctx context.Context, workerID int, job *models.Encod
 	}
 
 	canAcceptJob, usage := utils.CheckCPUUsage(w.cfg.Worker.MaxCPUUsage)
-	if !canAcceptJob {
-		w.logger.Infof("Worker %d: CPU usage too high (%.2f%%), requeueing job", workerID, usage)
+	memoryUsage := utils.CheckMemoryUsage()
+
+	if !canAcceptJob || memoryUsage > 85.0 {
+		w.logger.Infof("Worker %d: System resources too high (CPU: %.2f%%, Memory: %.2f%%), requeueing job", workerID, usage, memoryUsage)
 		select {
 		case w.jobs <- job:
 			return nil
@@ -245,20 +247,35 @@ func (w *Worker) processJob(ctx context.Context, workerID int, job *models.Encod
 		w.logger.Errorf("Failed to update final progress: %v", err)
 	}
 
-	playbackInfo := &models.PlaybackInfo{
-		VideoID:   job.VideoID,
-		Title:     filepath.Base(job.InputS3Key),
-		Duration:  result.Duration,
-		Thumbnail: fmt.Sprintf("%s/thumbnail.jpg", w.cfg.S3.CDNEndpoint),
-		Qualities: make(map[models.VideoQuality]models.QualityInfo),
-		Format:    models.FormatHLS,
-		Status:    models.JobStatusCompleted,
-	}
-
 	outputPath := job.OutputS3Key
 	videoExtensions := []string{".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm"}
 	for _, ext := range videoExtensions {
 		outputPath = strings.TrimSuffix(outputPath, ext)
+	}
+
+	var thumbnailURL string
+	if result.ThumbnailPath != "" {
+		thumbnailURL = fmt.Sprintf("%s/%s/thumbnail.jpg", w.cfg.S3.CDNEndpoint, outputPath)
+	}
+
+	var subtitleURLs []string
+	for _, subtitleFile := range result.SubtitleFiles {
+		if subtitleFile != "" {
+			fileName := filepath.Base(subtitleFile)
+			subtitleURL := fmt.Sprintf("%s/%s/subtitles/%s", w.cfg.S3.CDNEndpoint, outputPath, fileName)
+			subtitleURLs = append(subtitleURLs, subtitleURL)
+		}
+	}
+
+	playbackInfo := &models.PlaybackInfo{
+		VideoID:   job.VideoID,
+		Title:     filepath.Base(job.InputS3Key),
+		Duration:  result.Duration,
+		Thumbnail: thumbnailURL,
+		Qualities: make(map[models.VideoQuality]models.QualityInfo),
+		Subtitles: subtitleURLs,
+		Format:    models.FormatHLS,
+		Status:    models.JobStatusCompleted,
 	}
 
 	for _, qualityInfo := range result.Qualities {

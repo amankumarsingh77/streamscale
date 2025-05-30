@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,9 +25,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const (
-	maxConcurrentUploads = 20
-)
+
 
 type videoProcessor struct {
 	cfg       *config.Config
@@ -49,10 +48,12 @@ func NewVideoProcessor(cfg *config.Config, awsRepo videofiles.AWSRepository, vid
 }
 
 type ProcessingResult struct {
-	Duration  float64
-	Width     int
-	Height    int
-	Qualities []models.InputQualityInfo
+	Duration      float64
+	Width         int
+	Height        int
+	Qualities     []models.InputQualityInfo
+	SubtitleFiles []string
+	ThumbnailPath string
 }
 
 type QualityPreset struct {
@@ -62,10 +63,10 @@ type QualityPreset struct {
 }
 
 var qualityPresets = []QualityPreset{
-	{Name: models.Quality1080P, Resolution: [2]int{1920, 1080}, Bitrate: 4500},
-	{Name: models.Quality720P, Resolution: [2]int{1280, 720}, Bitrate: 2500},
-	{Name: models.Quality480P, Resolution: [2]int{854, 480}, Bitrate: 1000},
-	{Name: models.Quality360P, Resolution: [2]int{640, 360}, Bitrate: 600},
+	{Name: models.Quality1080P, Resolution: [2]int{1920, 1080}, Bitrate: 5000},
+	{Name: models.Quality720P, Resolution: [2]int{1280, 720}, Bitrate: 3000},
+	{Name: models.Quality480P, Resolution: [2]int{854, 480}, Bitrate: 1200},
+	{Name: models.Quality360P, Resolution: [2]int{640, 360}, Bitrate: 800},
 }
 
 func (p *videoProcessor) ProcessVideo(ctx context.Context, job *models.EncodeJob, videoID uuid.UUID) (*ProcessingResult, error) {
@@ -97,6 +98,27 @@ func (p *videoProcessor) ProcessVideo(ctx context.Context, job *models.EncodeJob
 		p.logger.Errorf("Failed to update progress after info extraction: %v", err)
 	}
 
+	subtitleFiles, err := p.extractSubtitles(localPath)
+	if err != nil {
+		p.logger.Warnf("Subtitle extraction failed: %v", err)
+		subtitleFiles = []string{}
+	}
+	p.logger.Debugf("Subtitles found %v", subtitleFiles)
+
+	if err := p.videoRepo.UpdateVideoProgress(ctx, videoID, models.JobStatusProcessing, 22); err != nil {
+		p.logger.Errorf("Failed to update progress after subtitle extraction: %v", err)
+	}
+
+	thumbnailPath, err := p.generateThumbnail(localPath, videoInfo.Duration)
+	if err != nil {
+		p.logger.Warnf("Thumbnail generation failed: %v", err)
+		thumbnailPath = ""
+	}
+
+	if err := p.videoRepo.UpdateVideoProgress(ctx, videoID, models.JobStatusProcessing, 25); err != nil {
+		p.logger.Errorf("Failed to update progress after thumbnail generation: %v", err)
+	}
+
 	segments, err := p.splitVideo(localPath, videoInfo)
 	if err != nil {
 		return nil, fmt.Errorf("split failed: %w", err)
@@ -111,33 +133,71 @@ func (p *videoProcessor) ProcessVideo(ctx context.Context, job *models.EncodeJob
 	qualitySegments := make(map[models.VideoQuality][]string)
 	qualityInfos := make([]models.InputQualityInfo, 0, len(applicablePresets))
 
-	for i, preset := range applicablePresets {
-		p.logger.Infof("Encoding for quality: %s", preset.Name)
+	type qualityResult struct {
+		preset   QualityPreset
+		segments []string
+		err      error
+	}
 
-		progressIncrement := 50.0 / float64(len(applicablePresets))
-		currentProgress := 30.0 + float64(i)*progressIncrement
+	resultChan := make(chan qualityResult, len(applicablePresets))
+	var wg sync.WaitGroup
 
-		if err := p.videoRepo.UpdateVideoProgress(ctx, videoID, models.JobStatusProcessing, float64(int(currentProgress))); err != nil {
-			p.logger.Errorf("Failed to update progress for quality %s: %v", preset.Name, err)
+	p.logger.Infof("Starting parallel encoding for %d quality levels with maximum CPU utilization", len(applicablePresets))
+
+	for _, preset := range applicablePresets {
+		wg.Add(1)
+		go func(preset QualityPreset) {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					p.logger.Errorf("Panic in quality encoding for %s: %v", preset.Name, r)
+					resultChan <- qualityResult{
+						preset:   preset,
+						segments: nil,
+						err:      fmt.Errorf("encoding panic for quality %s: %v", preset.Name, r),
+					}
+				}
+			}()
+
+			p.logger.Infof("Starting encoding for quality: %s", preset.Name)
+			encodedSegments, err := p.encodeSegmentsWithQuality(segments, preset, videoInfo)
+			resultChan <- qualityResult{
+				preset:   preset,
+				segments: encodedSegments,
+				err:      err,
+			}
+		}(preset)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	completedQualities := 0
+	for result := range resultChan {
+		if result.err != nil {
+			return nil, fmt.Errorf("encoding failed for quality %s: %w", result.preset.Name, result.err)
 		}
 
-		encodedSegments, err := p.encodeSegmentsWithQuality(segments, preset, videoInfo)
-		if err != nil {
-			return nil, fmt.Errorf("encoding failed for quality %s: %w", preset.Name, err)
-		}
-
-		qualitySegments[preset.Name] = encodedSegments
+		qualitySegments[result.preset.Name] = result.segments
 
 		qualityInfos = append(qualityInfos, models.InputQualityInfo{
-			Resolution: fmt.Sprintf("%dx%d", preset.Resolution[0], preset.Resolution[1]),
-			Bitrate:    preset.Bitrate,
-			MaxBitrate: int(float64(preset.Bitrate) * 1.5),
-			MinBitrate: int(float64(preset.Bitrate) * 0.5),
+			Resolution: fmt.Sprintf("%dx%d", result.preset.Resolution[0], result.preset.Resolution[1]),
+			Bitrate:    result.preset.Bitrate,
+			MaxBitrate: int(float64(result.preset.Bitrate) * 1.2),
+			MinBitrate: int(float64(result.preset.Bitrate) * 0.8),
 		})
 
-		if err := p.videoRepo.UpdateVideoProgress(ctx, videoID, models.JobStatusProcessing, float64(int(currentProgress+progressIncrement))); err != nil {
-			p.logger.Errorf("Failed to update progress after encoding quality %s: %v", preset.Name, err)
+		completedQualities++
+		progressIncrement := 50.0 / float64(len(applicablePresets))
+		currentProgress := 30.0 + float64(completedQualities)*progressIncrement
+
+		if err := p.videoRepo.UpdateVideoProgress(ctx, videoID, models.JobStatusProcessing, float64(int(currentProgress))); err != nil {
+			p.logger.Errorf("Failed to update progress for quality %s: %v", result.preset.Name, err)
 		}
+
+		p.logger.Infof("Completed aggressive encoding for quality: %s", result.preset.Name)
 	}
 
 	outputPath := filepath.Join(p.tempDir, "output")
@@ -160,15 +220,21 @@ func (p *videoProcessor) ProcessVideo(ctx context.Context, job *models.EncodeJob
 		return nil, fmt.Errorf("upload failed: %w", err)
 	}
 
+	if err := p.uploadSubtitleAndThumbnailFiles(ctx, subtitleFiles, thumbnailPath, outputKey); err != nil {
+		p.logger.Warnf("Failed to upload subtitle/thumbnail files: %v", err)
+	}
+
 	if err := p.videoRepo.UpdateVideoProgress(ctx, videoID, models.JobStatusProcessing, 90); err != nil {
 		p.logger.Errorf("Failed to update progress after upload: %v", err)
 	}
 
 	result := &ProcessingResult{
-		Duration:  videoInfo.Duration,
-		Width:     videoInfo.Width,
-		Height:    videoInfo.Height,
-		Qualities: qualityInfos,
+		Duration:      videoInfo.Duration,
+		Width:         videoInfo.Width,
+		Height:        videoInfo.Height,
+		Qualities:     qualityInfos,
+		SubtitleFiles: subtitleFiles,
+		ThumbnailPath: thumbnailPath,
 	}
 
 	return result, nil
@@ -193,21 +259,24 @@ func (p *videoProcessor) determineApplicablePresets(videoInfo *VideoInfo) []Qual
 	return applicablePresets
 }
 
-func (p *videoProcessor) encodeSegmentsWithQuality(segments []string, preset QualityPreset, videoInfo *VideoInfo) ([]string, error) {
+func (p *videoProcessor) encodeSegmentsWithQuality(segments []string, preset QualityPreset, _ *VideoInfo) ([]string, error) {
 	type encodeResult struct {
 		index int
 		path  string
 		err   error
 	}
 
+	maxEncoders := GetMaxConcurrentEncoders()
 	resultChan := make(chan encodeResult, len(segments))
-	sem := make(chan struct{}, MaxParallelJobs)
+	sem := make(chan struct{}, maxEncoders)
 	var wg sync.WaitGroup
 
 	qualityDir := filepath.Join(p.tempDir, "encoded_segments", string(preset.Name))
 	if err := os.MkdirAll(qualityDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create output directory for quality %s: %w", preset.Name, err)
 	}
+
+	p.logger.Infof("Starting aggressive encoding with %d concurrent encoders for %d segments", maxEncoders, len(segments))
 
 	for i, segment := range segments {
 		wg.Add(1)
@@ -217,7 +286,7 @@ func (p *videoProcessor) encodeSegmentsWithQuality(segments []string, preset Qua
 			defer func() { <-sem }()
 
 			outputPath := filepath.Join(qualityDir, fmt.Sprintf("encoded_%03d.mp4", idx))
-			err := p.encodeSingleSegmentWithQuality(inputPath, outputPath, preset)
+			err := p.encodeSingleSegmentWithQualityOptimized(inputPath, outputPath, preset)
 
 			resultChan <- encodeResult{
 				index: idx,
@@ -244,7 +313,6 @@ func (p *videoProcessor) encodeSegmentsWithQuality(segments []string, preset Qua
 }
 
 func (p *videoProcessor) encodeSingleSegmentWithQuality(inputPath, outputPath string, preset QualityPreset) error {
-	log.Println("p.job.Codec", p.job.Codec)
 	switch p.job.Codec {
 	case models.CodecH264:
 		return p.encodeSingleSegmentWithH264(inputPath, outputPath, preset)
@@ -255,65 +323,507 @@ func (p *videoProcessor) encodeSingleSegmentWithQuality(inputPath, outputPath st
 	}
 }
 
+func (p *videoProcessor) encodeSingleSegmentWithQualityOptimized(inputPath, outputPath string, preset QualityPreset) error {
+	switch p.job.Codec {
+	case models.CodecH264:
+		return p.encodeSingleSegmentWithH264Optimized(inputPath, outputPath, preset)
+	case models.CodecAV1:
+		return p.encodeSingleSegmentWithSVTAV1Optimized(inputPath, outputPath, preset)
+	default:
+		return fmt.Errorf("unsupported codec: %s", p.job.Codec)
+	}
+}
+
 func (p *videoProcessor) encodeSingleSegmentWithH264(inputPath, outputPath string, preset QualityPreset) error {
+	hwAccel := p.detectHardwareAcceleration()
+	encodingPreset := p.determineEncodingPreset(hwAccel)
 
-	cmd := exec.Command("ffmpeg",
+	args := []string{
+		"-y",
+		"-hide_banner",
+		"-loglevel", "error",
 		"-i", inputPath,
-		"-c:v", "libx264",
-		"-preset", "medium",
-		"-profile:v", "high",
-		"-level", "4.1",
-		"-vf", fmt.Sprintf("scale=%d:%d", preset.Resolution[0], preset.Resolution[1]),
+	}
 
+	var encoder string
+	var hwAccelArgs []string
+
+	switch hwAccel {
+	case HWAccelNVENC:
+		encoder = "h264_nvenc"
+		hwAccelArgs = []string{
+			"-hwaccel", "cuda",
+			"-hwaccel_output_format", "cuda",
+		}
+	case HWAccelQSV:
+		encoder = "h264_qsv"
+		hwAccelArgs = []string{
+			"-hwaccel", "qsv",
+			"-hwaccel_output_format", "qsv",
+		}
+	case HWAccelAMF:
+		encoder = "h264_amf"
+		hwAccelArgs = []string{
+			"-hwaccel", "d3d11va",
+			"-hwaccel_output_format", "d3d11",
+		}
+	case HWAccelVAAPI:
+		encoder = "h264_vaapi"
+		hwAccelArgs = []string{
+			"-hwaccel", "vaapi",
+			"-hwaccel_output_format", "vaapi",
+			"-hwaccel_device", "/dev/dri/renderD128",
+		}
+	default:
+		encoder = "libx264"
+	}
+
+	args = append(args, hwAccelArgs...)
+
+	videoFilter := fmt.Sprintf("scale=%d:%d", preset.Resolution[0], preset.Resolution[1])
+	if hwAccel == HWAccelVAAPI {
+		videoFilter = fmt.Sprintf("scale_vaapi=%d:%d", preset.Resolution[0], preset.Resolution[1])
+	} else if hwAccel == HWAccelNVENC {
+		videoFilter = fmt.Sprintf("scale_cuda=%d:%d", preset.Resolution[0], preset.Resolution[1])
+	}
+
+	encodingArgs := []string{
+		"-c:v", encoder,
+		"-preset", encodingPreset,
+		"-vf", videoFilter,
 		"-b:v", fmt.Sprintf("%dk", preset.Bitrate),
-		"-maxrate", fmt.Sprintf("%dk", int(float64(preset.Bitrate)*1.5)),
+		"-maxrate", fmt.Sprintf("%dk", int(float64(preset.Bitrate)*1.2)),
 		"-bufsize", fmt.Sprintf("%dk", preset.Bitrate*2),
-
-		"-g", "48",
-
+		"-g", "60",
+		"-keyint_min", "60",
+		"-sc_threshold", "0",
+		"-avoid_negative_ts", "make_zero",
+		"-fflags", "+genpts",
+		"-async", "1",
+		"-vsync", "cfr",
+		"-af", "aresample=async=1",
 		"-movflags", "+faststart",
-
 		"-c:a", "aac",
 		"-b:a", "128k",
-		"-y", outputPath,
-	)
+		"-ar", "48000",
+		"-ac", "2",
+	}
 
+	if hwAccel == HWAccelNone {
+		encodingArgs = append(encodingArgs,
+			"-profile:v", "high",
+			"-level", "4.1",
+			"-threads", "0",
+			"-x264-params", "ref=3:bframes=3:b-adapt=1:direct=auto:me=umh:subme=7:trellis=1:rc-lookahead=50",
+		)
+	} else if hwAccel == HWAccelNVENC {
+		encodingArgs = append(encodingArgs,
+			"-profile:v", "high",
+			"-level", "4.1",
+			"-rc", "vbr",
+			"-rc-lookahead", "32",
+			"-surfaces", "32",
+			"-bf", "3",
+			"-b_ref_mode", "middle",
+		)
+	}
+
+	args = append(args, encodingArgs...)
+	args = append(args, outputPath)
+
+	cmd := exec.Command("ffmpeg", args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
+		if hwAccel != HWAccelNone {
+			p.logger.Warn("Hardware acceleration failed, falling back to software encoding")
+			return p.encodeSingleSegmentWithH264Software(inputPath, outputPath, preset)
+		}
 		return fmt.Errorf("H.264 encoding failed: %v, stderr: %s", err, stderr.String())
+	}
+
+	if stat, err := os.Stat(outputPath); err != nil || stat.Size() == 0 {
+		return fmt.Errorf("encoding produced invalid output file")
 	}
 
 	return nil
 }
 
-func (p *videoProcessor) encodeSingleSegmentWithSVTAV1(inputPath, outputPath string, preset QualityPreset) error {
-
-	cmd := exec.Command("ffmpeg",
+func (p *videoProcessor) encodeSingleSegmentWithH264Software(inputPath, outputPath string, preset QualityPreset) error {
+	args := []string{
+		"-y",
+		"-hide_banner",
+		"-loglevel", "error",
 		"-i", inputPath,
-		"-c:v", "libsvtav1",
-		"-preset", "7",
+		"-c:v", "libx264",
+		"-preset", "fast",
+		"-profile:v", "high",
+		"-level", "4.1",
 		"-vf", fmt.Sprintf("scale=%d:%d", preset.Resolution[0], preset.Resolution[1]),
-
-		"-crf", "30",
-		"-maxrate", fmt.Sprintf("%dk", int(float64(preset.Bitrate)*1.5)),
+		"-b:v", fmt.Sprintf("%dk", preset.Bitrate),
+		"-maxrate", fmt.Sprintf("%dk", int(float64(preset.Bitrate)*1.2)),
 		"-bufsize", fmt.Sprintf("%dk", preset.Bitrate*2),
-
-		"-g", "240",
-
+		"-threads", "0",
+		"-g", "60",
+		"-keyint_min", "60",
+		"-sc_threshold", "0",
+		"-avoid_negative_ts", "make_zero",
+		"-fflags", "+genpts",
+		"-async", "1",
+		"-vsync", "cfr",
+		"-af", "aresample=async=1",
+		"-x264-params", "ref=3:bframes=3:b-adapt=1:direct=auto:me=umh:subme=7:trellis=1:rc-lookahead=50",
 		"-movflags", "+faststart",
-
 		"-c:a", "aac",
 		"-b:a", "128k",
-		"-y", outputPath,
-	)
+		"-ar", "48000",
+		"-ac", "2",
+		outputPath,
+	}
 
+	cmd := exec.Command("ffmpeg", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("software H.264 encoding failed: %v, stderr: %s", err, stderr.String())
+	}
+
+	if stat, err := os.Stat(outputPath); err != nil || stat.Size() == 0 {
+		return fmt.Errorf("encoding produced invalid output file")
+	}
+
+	return nil
+}
+
+type HardwareAccelType string
+
+const (
+	HWAccelNone    HardwareAccelType = ""
+	HWAccelNVENC   HardwareAccelType = "nvenc"
+	HWAccelVAAPI   HardwareAccelType = "vaapi"
+	HWAccelQSV     HardwareAccelType = "qsv"
+	HWAccelAMF     HardwareAccelType = "amf"
+)
+
+func (p *videoProcessor) detectHardwareAcceleration() HardwareAccelType {
+	if runtime.GOOS == "windows" {
+		if p.checkNVIDIA() {
+			return HWAccelNVENC
+		}
+		if p.checkAMD() {
+			return HWAccelAMF
+		}
+		if p.checkIntelQSV() {
+			return HWAccelQSV
+		}
+	} else if runtime.GOOS == "linux" {
+		if p.checkNVIDIA() {
+			return HWAccelNVENC
+		}
+		if p.checkVAAPI() {
+			return HWAccelVAAPI
+		}
+		if p.checkIntelQSV() {
+			return HWAccelQSV
+		}
+	}
+	return HWAccelNone
+}
+
+func (p *videoProcessor) checkNVIDIA() bool {
+	cmd := exec.Command("nvidia-smi")
+	return cmd.Run() == nil
+}
+
+func (p *videoProcessor) checkVAAPI() bool {
+	_, err := os.Stat("/dev/dri/renderD128")
+	return err == nil
+}
+
+func (p *videoProcessor) checkIntelQSV() bool {
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command("wmic", "path", "win32_VideoController", "get", "name")
+		output, err := cmd.Output()
+		if err != nil {
+			return false
+		}
+		return strings.Contains(strings.ToLower(string(output)), "intel")
+	}
+	return false
+}
+
+func (p *videoProcessor) checkAMD() bool {
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command("wmic", "path", "win32_VideoController", "get", "name")
+		output, err := cmd.Output()
+		if err != nil {
+			return false
+		}
+		return strings.Contains(strings.ToLower(string(output)), "amd") ||
+			   strings.Contains(strings.ToLower(string(output)), "radeon")
+	}
+	return false
+}
+
+func (p *videoProcessor) checkHardwareAcceleration() bool {
+	return p.detectHardwareAcceleration() != HWAccelNone
+}
+
+func (p *videoProcessor) determineEncodingPreset(hwAccel HardwareAccelType) string {
+	cores := runtime.NumCPU()
+
+	if hwAccel != HWAccelNone {
+		switch hwAccel {
+		case HWAccelNVENC:
+			return "p4"
+		case HWAccelQSV:
+			return "balanced"
+		case HWAccelAMF:
+			return "balanced"
+		case HWAccelVAAPI:
+			return "balanced"
+		}
+	}
+
+	switch {
+	case cores >= 16:
+		return "slow"
+	case cores >= 8:
+		return "medium"
+	case cores >= 4:
+		return "fast"
+	default:
+		return "veryfast"
+	}
+}
+
+func (p *videoProcessor) encodeSingleSegmentWithSVTAV1(inputPath, outputPath string, preset QualityPreset) error {
+	cores := runtime.NumCPU()
+	svtPreset := "8"
+
+	switch {
+	case cores >= 16:
+		svtPreset = "6"
+	case cores >= 8:
+		svtPreset = "7"
+	case cores >= 4:
+		svtPreset = "8"
+	default:
+		svtPreset = "9"
+	}
+
+	args := []string{
+		"-y",
+		"-hide_banner",
+		"-loglevel", "error",
+		"-i", inputPath,
+		"-c:v", "libsvtav1",
+		"-preset", svtPreset,
+		"-vf", fmt.Sprintf("scale=%d:%d", preset.Resolution[0], preset.Resolution[1]),
+		"-crf", "28",
+		"-maxrate", fmt.Sprintf("%dk", int(float64(preset.Bitrate)*1.2)),
+		"-bufsize", fmt.Sprintf("%dk", preset.Bitrate*2),
+		"-g", "240",
+		"-keyint_min", "240",
+		"-tile-columns", "2",
+		"-tile-rows", "1",
+		"-avoid_negative_ts", "make_zero",
+		"-fflags", "+genpts",
+		"-async", "1",
+		"-vsync", "cfr",
+		"-af", "aresample=async=1",
+		"-movflags", "+faststart",
+		"-c:a", "aac",
+		"-b:a", "128k",
+		"-ar", "48000",
+		"-ac", "2",
+		outputPath,
+	}
+
+	cmd := exec.Command("ffmpeg", args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("SVT-AV1 encoding failed: %v, stderr: %s", err, stderr.String())
+	}
+
+	if stat, err := os.Stat(outputPath); err != nil || stat.Size() == 0 {
+		return fmt.Errorf("AV1 encoding produced invalid output file")
+	}
+
+	return nil
+}
+
+func (p *videoProcessor) encodeSingleSegmentWithH264Optimized(inputPath, outputPath string, preset QualityPreset) error {
+	hwAccel := p.detectHardwareAcceleration()
+	cores := runtime.NumCPU()
+
+	args := []string{
+		"-y",
+		"-hide_banner",
+		"-loglevel", "error",
+		"-i", inputPath,
+	}
+
+	var encoder string
+	var hwAccelArgs []string
+
+	switch hwAccel {
+	case HWAccelNVENC:
+		encoder = "h264_nvenc"
+		hwAccelArgs = []string{
+			"-hwaccel", "cuda",
+			"-hwaccel_output_format", "cuda",
+		}
+	case HWAccelQSV:
+		encoder = "h264_qsv"
+		hwAccelArgs = []string{
+			"-hwaccel", "qsv",
+			"-hwaccel_output_format", "qsv",
+		}
+	case HWAccelAMF:
+		encoder = "h264_amf"
+		hwAccelArgs = []string{
+			"-hwaccel", "d3d11va",
+			"-hwaccel_output_format", "d3d11",
+		}
+	case HWAccelVAAPI:
+		encoder = "h264_vaapi"
+		hwAccelArgs = []string{
+			"-hwaccel", "vaapi",
+			"-hwaccel_output_format", "vaapi",
+			"-hwaccel_device", "/dev/dri/renderD128",
+		}
+	default:
+		encoder = "libx264"
+	}
+
+	args = append(args, hwAccelArgs...)
+
+	videoFilter := fmt.Sprintf("scale=%d:%d", preset.Resolution[0], preset.Resolution[1])
+	if hwAccel == HWAccelVAAPI {
+		videoFilter = fmt.Sprintf("scale_vaapi=%d:%d", preset.Resolution[0], preset.Resolution[1])
+	} else if hwAccel == HWAccelNVENC {
+		videoFilter = fmt.Sprintf("scale_cuda=%d:%d", preset.Resolution[0], preset.Resolution[1])
+	}
+
+	encodingArgs := []string{
+		"-c:v", encoder,
+		"-preset", "fast",
+		"-vf", videoFilter,
+		"-b:v", fmt.Sprintf("%dk", preset.Bitrate),
+		"-maxrate", fmt.Sprintf("%dk", int(float64(preset.Bitrate)*1.1)),
+		"-bufsize", fmt.Sprintf("%dk", preset.Bitrate),
+		"-g", "30",
+		"-keyint_min", "30",
+		"-sc_threshold", "0",
+		"-avoid_negative_ts", "make_zero",
+		"-fflags", "+genpts",
+		"-async", "1",
+		"-vsync", "cfr",
+		"-af", "aresample=async=1",
+		"-movflags", "+faststart",
+		"-c:a", "aac",
+		"-b:a", "96k",
+		"-ar", "44100",
+		"-ac", "2",
+	}
+
+	if hwAccel == HWAccelNone {
+		encodingArgs = append(encodingArgs,
+			"-profile:v", "main",
+			"-level", "3.1",
+			"-threads", fmt.Sprintf("%d", cores),
+			"-x264-params", "ref=1:bframes=0:b-adapt=0:direct=spatial:me=dia:subme=1:trellis=0:rc-lookahead=10",
+		)
+	} else if hwAccel == HWAccelNVENC {
+		encodingArgs = append(encodingArgs,
+			"-profile:v", "main",
+			"-level", "3.1",
+			"-rc", "cbr",
+			"-rc-lookahead", "8",
+			"-surfaces", "8",
+			"-bf", "0",
+		)
+	}
+
+	args = append(args, encodingArgs...)
+	args = append(args, outputPath)
+
+	cmd := exec.Command("ffmpeg", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if hwAccel != HWAccelNone {
+			return p.encodeSingleSegmentWithH264Software(inputPath, outputPath, preset)
+		}
+		return fmt.Errorf("optimized H.264 encoding failed: %v, stderr: %s", err, stderr.String())
+	}
+
+	if stat, err := os.Stat(outputPath); err != nil || stat.Size() == 0 {
+		return fmt.Errorf("encoding produced invalid output file")
+	}
+
+	return nil
+}
+
+func (p *videoProcessor) encodeSingleSegmentWithSVTAV1Optimized(inputPath, outputPath string, preset QualityPreset) error {
+	cores := runtime.NumCPU()
+	svtPreset := "10"
+
+	switch {
+	case cores >= 32:
+		svtPreset = "8"
+	case cores >= 16:
+		svtPreset = "9"
+	case cores >= 8:
+		svtPreset = "10"
+	default:
+		svtPreset = "11"
+	}
+
+	args := []string{
+		"-y",
+		"-hide_banner",
+		"-loglevel", "error",
+		"-i", inputPath,
+		"-c:v", "libsvtav1",
+		"-preset", svtPreset,
+		"-vf", fmt.Sprintf("scale=%d:%d", preset.Resolution[0], preset.Resolution[1]),
+		"-crf", "32",
+		"-maxrate", fmt.Sprintf("%dk", int(float64(preset.Bitrate)*1.1)),
+		"-bufsize", fmt.Sprintf("%dk", preset.Bitrate),
+		"-g", "120",
+		"-keyint_min", "120",
+		"-tile-columns", "4",
+		"-tile-rows", "2",
+		"-avoid_negative_ts", "make_zero",
+		"-fflags", "+genpts",
+		"-async", "1",
+		"-vsync", "cfr",
+		"-af", "aresample=async=1",
+		"-movflags", "+faststart",
+		"-c:a", "aac",
+		"-b:a", "96k",
+		"-ar", "44100",
+		"-ac", "2",
+		outputPath,
+	}
+
+	cmd := exec.Command("ffmpeg", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("optimized SVT-AV1 encoding failed: %v, stderr: %s", err, stderr.String())
+	}
+
+	if stat, err := os.Stat(outputPath); err != nil || stat.Size() == 0 {
+		return fmt.Errorf("AV1 encoding produced invalid output file")
 	}
 
 	return nil
@@ -340,12 +850,13 @@ func (p *videoProcessor) uploadProcessedFiles(ctx context.Context, outputPath, o
 	results := make(chan error)
 	var wg sync.WaitGroup
 
-	for i := 0; i < maxConcurrentUploads; i++ {
+	maxWorkers := min(MaxConcurrentUploads, MaxIOWorkers)
+	for i := 0; i < maxWorkers; i++ {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
 			for job := range jobs {
-				err := p.uploadSingleFile(ctx, job.path, job.s3Key, job.fileInfo)
+				err := p.uploadSingleFileOptimized(ctx, job.path, job.s3Key, job.fileInfo)
 				if err != nil {
 					select {
 					case results <- fmt.Errorf("worker %d failed to upload %s: %w", workerID, job.relPath, err):
@@ -461,6 +972,88 @@ func (p *videoProcessor) uploadSingleFile(ctx context.Context, path, s3Key strin
 	return nil
 }
 
+func (p *videoProcessor) uploadSingleFileOptimized(ctx context.Context, path, s3Key string, fileInfo os.FileInfo) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %w", err)
+	}
+	defer file.Close()
+
+	contentType := getContentType(path)
+
+	uploadInput := models.UploadInput{
+		File:       file,
+		BucketName: p.cfg.S3.OutputBucket,
+		Key:        s3Key,
+		MimeType:   contentType,
+		Size:       fileInfo.Size(),
+	}
+
+	maxRetries := 2
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if _, err := file.Seek(0, 0); err != nil {
+			return fmt.Errorf("failed to reset file pointer: %w", err)
+		}
+
+		_, err := p.awsRepo.PutObject(ctx, uploadInput)
+		if err == nil {
+			return nil
+		}
+
+		if attempt < maxRetries {
+			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+			continue
+		}
+
+		return fmt.Errorf("failed to upload after %d attempts: %w", maxRetries, err)
+	}
+
+	return nil
+}
+
+func (p *videoProcessor) uploadSubtitleAndThumbnailFiles(ctx context.Context, subtitleFiles []string, thumbnailPath, outputKey string) error {
+	baseKey := strings.TrimSuffix(outputKey, filepath.Ext(outputKey))
+
+	for _, subtitleFile := range subtitleFiles {
+		if subtitleFile == "" {
+			continue
+		}
+
+		fileName := filepath.Base(subtitleFile)
+		s3Key := fmt.Sprintf("%s/subtitles/%s", baseKey, fileName)
+
+		fileInfo, err := os.Stat(subtitleFile)
+		if err != nil {
+			p.logger.Warnf("Failed to stat subtitle file %s: %v", subtitleFile, err)
+			continue
+		}
+
+		if err := p.uploadSingleFileOptimized(ctx, subtitleFile, s3Key, fileInfo); err != nil {
+			p.logger.Warnf("Failed to upload subtitle file %s: %v", subtitleFile, err)
+		} else {
+			p.logger.Infof("Successfully uploaded subtitle file: %s", s3Key)
+		}
+	}
+
+	if thumbnailPath != "" {
+		fileName := filepath.Base(thumbnailPath)
+		s3Key := fmt.Sprintf("%s/%s", baseKey, fileName)
+
+		fileInfo, err := os.Stat(thumbnailPath)
+		if err != nil {
+			return fmt.Errorf("failed to stat thumbnail file %s: %w", thumbnailPath, err)
+		}
+
+		if err := p.uploadSingleFileOptimized(ctx, thumbnailPath, s3Key, fileInfo); err != nil {
+			return fmt.Errorf("failed to upload thumbnail file %s: %w", thumbnailPath, err)
+		}
+
+		p.logger.Infof("Successfully uploaded thumbnail file: %s", s3Key)
+	}
+
+	return nil
+}
+
 func getContentType(filename string) string {
 	ext := strings.ToLower(filepath.Ext(filename))
 	switch ext {
@@ -476,6 +1069,16 @@ func getContentType(filename string) string {
 		return "application/dash+xml"
 	case ".json":
 		return "application/json"
+	case ".srt":
+		return "text/srt"
+	case ".vtt":
+		return "text/vtt"
+	case ".ass":
+		return "text/x-ass"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
 	default:
 		if contentType := mime.TypeByExtension(ext); contentType != "" {
 			return contentType
@@ -492,8 +1095,6 @@ func (p *videoProcessor) downloadVideo(ctx context.Context, inputKey string) (st
 		return "", fmt.Errorf("failed to create temp directory: %w", err)
 	}
 
-	log.Println("inputKey", inputKey)
-
 	localPath := filepath.Join(p.tempDir, filepath.Base(inputKey))
 
 	videoFile, err := p.awsRepo.GetObject(ctx, p.cfg.S3.InputBucket, inputKey)
@@ -508,7 +1109,8 @@ func (p *videoProcessor) downloadVideo(ctx context.Context, inputKey string) (st
 	}
 	defer outFile.Close()
 
-	if _, err = io.Copy(outFile, videoFile.Body); err != nil {
+	buffer := make([]byte, 1024*1024)
+	if _, err = io.CopyBuffer(outFile, videoFile.Body, buffer); err != nil {
 		return "", fmt.Errorf("failed to write video file: %w", err)
 	}
 
@@ -521,19 +1123,25 @@ func (p *videoProcessor) splitVideo(inputPath string, videoInfo *VideoInfo) ([]s
 		return nil, fmt.Errorf("failed to create segment directory: %w", err)
 	}
 
-	segmentCount := math.Min(math.Ceil(videoInfo.Duration/MinSegmentDuration), MaxSegments)
+	optimalSegmentDuration := p.calculateOptimalSegmentDuration(videoInfo.Duration)
+	segmentCount := math.Min(math.Ceil(videoInfo.Duration/optimalSegmentDuration), MaxSegments)
 	segmentDuration := math.Ceil(videoInfo.Duration / segmentCount)
 
-	cmd := exec.Command("ffmpeg",
+	args := []string{
+		"-y",
+		"-hide_banner",
+		"-loglevel", "error",
 		"-i", inputPath,
 		"-c", "copy",
 		"-f", "segment",
 		"-segment_time", fmt.Sprintf("%.0f", segmentDuration),
-		"-reset_timestamps", "1",
+		"-avoid_negative_ts", "make_zero",
+		"-fflags", "+genpts",
 		"-segment_format_options", "movflags=+faststart",
 		filepath.Join(segmentDir, "segment_%03d.mp4"),
-	)
+	}
 
+	cmd := exec.Command("ffmpeg", args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -551,6 +1159,23 @@ func (p *videoProcessor) splitVideo(inputPath string, videoInfo *VideoInfo) ([]s
 	}
 
 	return segments, nil
+}
+
+func (p *videoProcessor) calculateOptimalSegmentDuration(totalDuration float64) float64 {
+	maxEncoders := GetMaxConcurrentEncoders()
+
+	switch {
+	case totalDuration <= 30:
+		return math.Max(totalDuration/float64(maxEncoders/2), MinSegmentDuration)
+	case totalDuration <= 120:
+		return math.Max(totalDuration/float64(maxEncoders), MinSegmentDuration)
+	case totalDuration <= 600:
+		return math.Max(totalDuration/float64(maxEncoders*2), MinSegmentDuration)
+	case totalDuration <= 1800:
+		return math.Max(totalDuration/float64(maxEncoders*3), MinSegmentDuration)
+	default:
+		return math.Max(totalDuration/float64(MaxSegments), MinSegmentDuration)
+	}
 }
 
 // normalizeVideoDuration ensures that the video has exactly the specified duration
@@ -581,6 +1206,7 @@ func (p *videoProcessor) normalizeVideoDuration(inputPath string, targetDuration
 func (p *videoProcessor) stitchAndPackageMultiQuality(qualitySegments map[models.VideoQuality][]string, outputPath string) error {
 
 	packagingDir := filepath.Join(p.tempDir, "packaging")
+	log.Println("packagingDir ",packagingDir)
 	if err := os.MkdirAll(packagingDir, 0755); err != nil {
 		return fmt.Errorf("failed to create packaging directory: %w", err)
 	}
@@ -593,8 +1219,13 @@ func (p *videoProcessor) stitchAndPackageMultiQuality(qualitySegments map[models
 			return fmt.Errorf("failed to create output directory for quality %s: %w", quality, err)
 		}
 
+		p.logger.Infof("Stitching %d segments for quality %s", len(segments), quality)
+		for i, segment := range segments {
+			p.logger.Infof("Segment %d: %s", i, segment)
+		}
+
 		stitchedPath := filepath.Join(packagingDir, fmt.Sprintf("stitched_%s.mp4", quality))
-		if err := p.stitchSegmentsToFile(segments, stitchedPath); err != nil {
+		if err := p.stitchSegmentsToFileOptimized(segments, stitchedPath); err != nil {
 			return fmt.Errorf("failed to stitch segments for quality %s: %w", quality, err)
 		}
 
@@ -643,7 +1274,7 @@ func (p *videoProcessor) stitchAndPackageMultiQuality(qualitySegments map[models
 	}
 
 	opts := stitchAndPackageOptions{
-		segmentDuration: 6,
+		segmentDuration: 4,
 		withHLS:         true,
 		withDASH:        true,
 	}
@@ -655,6 +1286,98 @@ func (p *videoProcessor) stitchAndPackageMultiQuality(qualitySegments map[models
 	}
 
 	return nil
+}
+
+func (p *videoProcessor) stitchSegmentsToFileOptimized(segments []string, outputPath string) error {
+	if len(segments) == 0 {
+		return fmt.Errorf("no segments to stitch")
+	}
+
+	if len(segments) == 1 {
+		return p.copyFile(segments[0], outputPath)
+	}
+
+	concatListPath := outputPath + ".concat"
+	defer os.Remove(concatListPath)
+
+	concatFile, err := os.Create(concatListPath)
+	if err != nil {
+		return fmt.Errorf("failed to create concat list: %w", err)
+	}
+	defer concatFile.Close()
+
+	for _, segment := range segments {
+		if _, err := os.Stat(segment); os.IsNotExist(err) {
+			return fmt.Errorf("segment file does not exist: %s", segment)
+		}
+
+		absPath, err := filepath.Abs(segment)
+		if err != nil {
+			return fmt.Errorf("failed to get absolute path for %s: %w", segment, err)
+		}
+
+		cleanPath := filepath.Clean(absPath)
+		if _, err := fmt.Fprintf(concatFile, "file '%s'\n", cleanPath); err != nil {
+			return fmt.Errorf("failed to write to concat list: %w", err)
+		}
+	}
+
+	if err := concatFile.Close(); err != nil {
+		return fmt.Errorf("failed to close concat file: %w", err)
+	}
+
+	args := []string{
+		"-y",
+		"-hide_banner",
+		"-loglevel", "error",
+		"-f", "concat",
+		"-safe", "0",
+		"-i", concatListPath,
+		"-c", "copy",
+		"-avoid_negative_ts", "make_zero",
+		"-fflags", "+genpts",
+		outputPath,
+	}
+
+	cmd := exec.Command("ffmpeg", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	workingDir, _ := os.Getwd()
+	p.logger.Infof("FFmpeg working directory: %s", workingDir)
+	p.logger.Infof("FFmpeg command: %v", args)
+
+	if err := cmd.Run(); err != nil {
+		p.logger.Errorf("FFmpeg stitching failed. Args: %v", args)
+		p.logger.Errorf("Working directory: %s", workingDir)
+		p.logger.Errorf("Concat file path: %s", concatListPath)
+		p.logger.Errorf("Output path: %s", outputPath)
+		p.logger.Errorf("Concat file contents:")
+		if content, readErr := os.ReadFile(concatListPath); readErr == nil {
+			p.logger.Errorf("%s", string(content))
+		}
+		return fmt.Errorf("stitching failed: %v, stderr: %s", err, stderr.String())
+	}
+
+	return nil
+}
+
+func (p *videoProcessor) copyFile(src, dst string) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+
+	buffer := make([]byte, 1024*1024)
+	_, err = io.CopyBuffer(destFile, sourceFile, buffer)
+	return err
 }
 
 func (p *videoProcessor) createMasterPlaylist(outputPath string, qualitySegments map[models.VideoQuality][]string) error {
@@ -714,45 +1437,7 @@ func (p *videoProcessor) createMasterPlaylist(outputPath string, qualitySegments
 	return nil
 }
 
-func (p *videoProcessor) stitchSegmentsToFile(segments []string, outputPath string) error {
 
-	concatListPath := filepath.Join(p.tempDir, "concat_list.txt")
-	concatFile, err := os.Create(concatListPath)
-	if err != nil {
-		return fmt.Errorf("failed to create concat list: %w", err)
-	}
-	defer os.Remove(concatListPath)
-	defer concatFile.Close()
-
-	for _, segment := range segments {
-		absPath, err := filepath.Abs(segment)
-		if err != nil {
-			return fmt.Errorf("failed to get absolute path for segment: %w", err)
-		}
-		if _, err := fmt.Fprintf(concatFile, "file '%s'\n", absPath); err != nil {
-			return fmt.Errorf("failed to write to concat list: %w", err)
-		}
-	}
-	concatFile.Close()
-
-	cmd := exec.Command("ffmpeg",
-		"-f", "concat",
-		"-safe", "0",
-		"-i", concatListPath,
-		"-c", "copy",
-		"-movflags", "+faststart",
-		"-y", outputPath,
-	)
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("ffmpeg concat failed: %v, stderr: %s", err, stderr.String())
-	}
-
-	return nil
-}
 
 func GetVideoInfo(inputPath string) (*VideoInfo, error) {
 	dir, err := os.Getwd()
@@ -760,7 +1445,8 @@ func GetVideoInfo(inputPath string) (*VideoInfo, error) {
 		return nil, err
 	}
 	finalPath := filepath.Join(dir, inputPath)
-	cmd := exec.Command("ffprobe", "-v", "error", "-select_streams", "v:0",
+
+	cmd := exec.Command("ffprobe", "-v", "quiet", "-select_streams", "v:0",
 		"-show_entries", "stream=width,height", "-of", "csv=p=0", finalPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -769,10 +1455,24 @@ func GetVideoInfo(inputPath string) (*VideoInfo, error) {
 
 	trimmedOutput := strings.TrimSpace(string(output))
 	trimmedOutput = strings.TrimRight(trimmedOutput, ",")
-	parts := strings.Split(trimmedOutput, ",")
 
+	lines := strings.Split(trimmedOutput, "\n")
+	var validLine string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.Contains(line, "@") && !strings.Contains(line, "[") {
+			validLine = line
+			break
+		}
+	}
+
+	if validLine == "" {
+		return nil, fmt.Errorf("no valid video info found in ffprobe output: %s", trimmedOutput)
+	}
+
+	parts := strings.Split(validLine, ",")
 	if len(parts) != 2 {
-		return nil, fmt.Errorf("unexpected ffprobe output: %s", trimmedOutput)
+		return nil, fmt.Errorf("unexpected ffprobe output format: %s", validLine)
 	}
 
 	width, err := strconv.Atoi(parts[0])
@@ -785,14 +1485,25 @@ func GetVideoInfo(inputPath string) (*VideoInfo, error) {
 		return nil, fmt.Errorf("invalid height: %v", err)
 	}
 
-	cmd = exec.Command("ffprobe", "-v", "error", "-show_entries",
+	cmd = exec.Command("ffprobe", "-v", "quiet", "-show_entries",
 		"format=duration", "-of", "csv=p=0", finalPath)
 	durationOutput, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("ffprobe duration error: %v", err)
 	}
 
-	duration, err := strconv.ParseFloat(strings.TrimSpace(string(durationOutput)), 64)
+	durationStr := strings.TrimSpace(string(durationOutput))
+	durationLines := strings.Split(durationStr, "\n")
+	var validDurationLine string
+	for _, line := range durationLines {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.Contains(line, "@") && !strings.Contains(line, "[") {
+			validDurationLine = line
+			break
+		}
+	}
+
+	duration, err := strconv.ParseFloat(validDurationLine, 64)
 	if err != nil {
 		return nil, fmt.Errorf("invalid duration: %v", err)
 	}
@@ -914,4 +1625,176 @@ func (p *videoProcessor) analyzeBitrate(sampleSegment string, videoInfo *VideoIn
 	adjustedBitrate := int(float64(baseBitrate) * (0.3 + 0.7*complexityScore))
 
 	return adjustedBitrate, nil
+}
+
+
+
+func (p *videoProcessor) extractSubtitles(inputPath string) ([]string, error) {
+	subtitleDir := filepath.Join(p.tempDir, "subtitles")
+	if err := os.MkdirAll(subtitleDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create subtitle directory: %w", err)
+	}
+
+	cmd := exec.Command("ffprobe", "-v", "quiet", "-select_streams", "s",
+		"-show_entries", "stream=index,codec_name:stream_tags=language,title",
+		"-of", "csv=p=0", inputPath)
+
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = io.Discard
+
+	if err := cmd.Run(); err != nil {
+		p.logger.Infof("No subtitle streams found in video: %v", err)
+		return []string{}, nil
+	}
+
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	var extractedFiles []string
+	subtitleIndex := 0
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		parts := strings.Split(line, ",")
+		if len(parts) < 2 {
+			continue
+		}
+
+		streamIndex := parts[0]
+		codecName := parts[1]
+
+		var language string
+		if len(parts) > 2 && parts[2] != "" {
+			language = parts[2]
+		} else {
+			language = "und"
+		}
+
+		tempOutputPath := filepath.Join(subtitleDir, fmt.Sprintf("temp_subtitle_%d.%s", subtitleIndex, getOriginalSubtitleExt(codecName)))
+
+		extractCmd := exec.Command("ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+			"-i", inputPath, "-map", fmt.Sprintf("0:%s", streamIndex), "-c:s", "copy", tempOutputPath)
+
+		var stderr bytes.Buffer
+		extractCmd.Stderr = &stderr
+
+		if err := extractCmd.Run(); err != nil {
+			p.logger.Warnf("Failed to extract subtitle stream %s: %v, stderr: %s", streamIndex, err, stderr.String())
+			continue
+		}
+
+		if stat, err := os.Stat(tempOutputPath); err != nil || stat.Size() == 0 {
+			p.logger.Warnf("Extracted subtitle file is empty or doesn't exist: %s", tempOutputPath)
+			os.Remove(tempOutputPath)
+			continue
+		}
+
+		finalOutputPath := filepath.Join(subtitleDir, fmt.Sprintf("subtitle_%d_%s.vtt", subtitleIndex, language))
+
+		if err := p.convertToVTT(tempOutputPath, finalOutputPath, codecName); err != nil {
+			p.logger.Warnf("Failed to convert subtitle to VTT: %v", err)
+			os.Remove(tempOutputPath)
+			continue
+		}
+
+		os.Remove(tempOutputPath)
+
+		extractedFiles = append(extractedFiles, finalOutputPath)
+		p.logger.Infof("Extracted and converted subtitle stream %s (%s) to %s", streamIndex, language, finalOutputPath)
+		subtitleIndex++
+	}
+
+	return extractedFiles, nil
+}
+
+func getOriginalSubtitleExt(codecName string) string {
+	switch codecName {
+	case "subrip":
+		return "srt"
+	case "webvtt":
+		return "vtt"
+	case "ass", "ssa":
+		return "ass"
+	case "mov_text":
+		return "srt"
+	case "dvd_subtitle", "dvdsub":
+		return "sub"
+	case "hdmv_pgs_subtitle":
+		return "sup"
+	default:
+		return "srt"
+	}
+}
+
+func (p *videoProcessor) convertToVTT(inputPath, outputPath, codecName string) error {
+	if codecName == "webvtt" {
+		return p.copyFile(inputPath, outputPath)
+	}
+
+	args := []string{
+		"-y",
+		"-hide_banner",
+		"-loglevel", "error",
+		"-i", inputPath,
+		"-c:s", "webvtt",
+		outputPath,
+	}
+
+	cmd := exec.Command("ffmpeg", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("VTT conversion failed: %v, stderr: %s", err, stderr.String())
+	}
+
+	if stat, err := os.Stat(outputPath); err != nil || stat.Size() == 0 {
+		return fmt.Errorf("VTT conversion produced invalid output file")
+	}
+
+	return nil
+}
+
+func (p *videoProcessor) generateThumbnail(inputPath string, duration float64) (string, error) {
+	thumbnailDir := filepath.Join(p.tempDir, "thumbnails")
+	if err := os.MkdirAll(thumbnailDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create thumbnail directory: %w", err)
+	}
+
+	outputPath := filepath.Join(thumbnailDir, "thumbnail.jpg")
+
+	timestamp := duration * 0.1
+	if timestamp < 1.0 {
+		timestamp = 1.0
+	}
+
+	args := []string{
+		"-y",
+		"-hide_banner",
+		"-loglevel", "error",
+		"-ss", fmt.Sprintf("%.2f", timestamp),
+		"-i", inputPath,
+		"-vframes", "1",
+		"-q:v", "2",
+		"-vf", "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2",
+		outputPath,
+	}
+
+	cmd := exec.Command("ffmpeg", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("thumbnail generation failed: %v, stderr: %s", err, stderr.String())
+	}
+
+	if stat, err := os.Stat(outputPath); err != nil || stat.Size() == 0 {
+		return "", fmt.Errorf("thumbnail generation produced invalid output file")
+	}
+
+	p.logger.Infof("Generated thumbnail at timestamp %.2fs: %s", timestamp, outputPath)
+	return outputPath, nil
 }

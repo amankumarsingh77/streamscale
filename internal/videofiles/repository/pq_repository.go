@@ -199,13 +199,13 @@ func (v *videoRepo) DeleteVideo(ctx context.Context, userID uuid.UUID, videoID u
 
 func (v *videoRepo) GetPlaybackInfo(ctx context.Context, videoID uuid.UUID) (*models.PlaybackInfo, error) {
 	query := `
-		SELECT 
+		SELECT
 			video_id, title, duration, thumbnail,
 			COALESCE(qualities::text, '{}') as qualities,
-			COALESCE(subtitles::text, '[]') as subtitles,
+			COALESCE(subtitles, ARRAY[]::text[]) as subtitles,
 			format, status, error_message,
 			created_at, updated_at
-		FROM playback_info 
+		FROM playback_info
 		WHERE video_id = $1`
 
 	var result struct {
@@ -214,7 +214,7 @@ func (v *videoRepo) GetPlaybackInfo(ctx context.Context, videoID uuid.UUID) (*mo
 		Duration     float64               `db:"duration"`
 		Thumbnail    string                `db:"thumbnail"`
 		QualitiesRaw string                `db:"qualities"`
-		SubtitlesRaw string                `db:"subtitles"`
+		Subtitles    pq.StringArray        `db:"subtitles"`
 		Format       models.PlaybackFormat `db:"format"`
 		Status       models.JobStatus      `db:"status"`
 		ErrorMessage string                `db:"error_message"`
@@ -232,7 +232,7 @@ func (v *videoRepo) GetPlaybackInfo(ctx context.Context, videoID uuid.UUID) (*mo
 		Duration:     result.Duration,
 		Thumbnail:    result.Thumbnail,
 		Qualities:    make(map[models.VideoQuality]models.QualityInfo),
-		Subtitles:    make([]string, 0),
+		Subtitles:    []string(result.Subtitles),
 		Format:       result.Format,
 		Status:       result.Status,
 		ErrorMessage: result.ErrorMessage,
@@ -243,11 +243,6 @@ func (v *videoRepo) GetPlaybackInfo(ctx context.Context, videoID uuid.UUID) (*mo
 	// Unmarshal qualities
 	if err := json.Unmarshal([]byte(result.QualitiesRaw), &playbackInfo.Qualities); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal qualities: %w", err)
-	}
-
-	// Unmarshal subtitles
-	if err := json.Unmarshal([]byte(result.SubtitlesRaw), &playbackInfo.Subtitles); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal subtitles: %w", err)
 	}
 
 	return playbackInfo, nil
@@ -299,8 +294,8 @@ func (v *videoRepo) CreatePlaybackInfo(ctx context.Context, videoID uuid.UUID, i
 
 func (v *videoRepo) UpdateVideoProgress(ctx context.Context, videoID uuid.UUID, status models.JobStatus, progress float64) error {
 	query := `
-		UPDATE video_files 
-		SET progress = $1, status = $2, updated_at = CURRENT_TIMESTAMP 
+		UPDATE video_files
+		SET progress = $1, status = $2, updated_at = CURRENT_TIMESTAMP
 		WHERE video_id = $3
 		RETURNING video_id`
 

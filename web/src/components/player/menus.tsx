@@ -20,6 +20,13 @@ import {
 
 import { buttonClass, tooltipClass } from "./buttons";
 
+interface SubtitleTrack {
+  src: string;
+  label: string;
+  language: string;
+  kind: "subtitles" | "captions";
+}
+
 export interface SettingsProps {
   placement: MenuPlacement;
   tooltipPlacement: TooltipPlacement;
@@ -28,6 +35,7 @@ export interface SettingsProps {
   onQualityChange?: (quality: string) => void;
   playbackSpeed?: number;
   onPlaybackSpeedChange?: (speed: number) => void;
+  subtitleTracks?: SubtitleTrack[];
 }
 
 export const menuClass =
@@ -36,14 +44,15 @@ export const menuClass =
 export const submenuClass =
   "hidden w-full flex-col items-start justify-center outline-none data-[keyboard]:mt-[3px] data-[open]:inline-block";
 
-export function Settings({ 
-  placement, 
+export function Settings({
+  placement,
   tooltipPlacement,
   qualities = [],
-  selectedQuality = 'auto',
+  selectedQuality = "auto",
   onQualityChange,
   playbackSpeed = 1,
-  onPlaybackSpeedChange
+  onPlaybackSpeedChange,
+  subtitleTracks = [],
 }: SettingsProps) {
   return (
     <Menu.Root className="parent">
@@ -58,31 +67,55 @@ export function Settings({
         </Tooltip.Content>
       </Tooltip.Root>
       <Menu.Content className={menuClass} placement={placement}>
-        <CaptionSubmenu />
+        <CaptionSubmenu subtitleTracks={subtitleTracks} />
         {qualities.length > 0 && (
-          <QualitySubmenu 
-            qualities={qualities} 
-            selectedQuality={selectedQuality} 
-            onQualityChange={onQualityChange} 
+          <QualitySubmenu
+            qualities={qualities}
+            selectedQuality={selectedQuality}
+            onQualityChange={onQualityChange}
           />
         )}
-        <PlaybackSpeedSubmenu 
-          playbackSpeed={playbackSpeed} 
-          onPlaybackSpeedChange={onPlaybackSpeedChange} 
+        <PlaybackSpeedSubmenu
+          playbackSpeed={playbackSpeed}
+          onPlaybackSpeedChange={onPlaybackSpeedChange}
         />
       </Menu.Content>
     </Menu.Root>
   );
 }
 
-function CaptionSubmenu() {
-  const options = useCaptionOptions(),
-    hint = options.selectedTrack?.label ?? "Off";
+function CaptionSubmenu({
+  subtitleTracks = [],
+}: {
+  subtitleTracks?: SubtitleTrack[];
+}) {
+  const options = useCaptionOptions();
+
+  // Create hint with language code if available
+  let hint = "Off";
+  if (options.selectedTrack) {
+    const language = options.selectedTrack.language as string;
+    const label = options.selectedTrack.label as string;
+    hint =
+      language && typeof language === "string"
+        ? `${language.toUpperCase()} - ${label}`
+        : label || "On";
+  }
+
+  // Show subtitle count in hint if available
+  const enhancedHint =
+    subtitleTracks.length > 0
+      ? `${hint} (${subtitleTracks.length} available)`
+      : hint;
+
+  console.log("Caption options:", options);
+  console.log("Available subtitle tracks:", subtitleTracks);
+
   return (
     <Menu.Root>
       <SubmenuButton
         label="Captions"
-        hint={hint}
+        hint={enhancedHint}
         disabled={options.disabled}
         icon={<ClosedCaptionsIcon className="w-5 h-5" />}
       />
@@ -91,9 +124,11 @@ function CaptionSubmenu() {
           className="w-full flex flex-col"
           value={options.selectedValue}
         >
-          {options.map(({ label, value, select }) => (
+          {options.map(({ label, track, value, select }) => (
             <Radio value={value} onSelect={select} key={value}>
-              {label}
+              {track?.language && typeof track.language === "string"
+                ? `${(track.language as string).toUpperCase()} - ${label}`
+                : label}
             </Radio>
           ))}
         </Menu.RadioGroup>
@@ -102,14 +137,14 @@ function CaptionSubmenu() {
   );
 }
 
-function QualitySubmenu({ 
-  qualities, 
-  selectedQuality = 'auto', 
-  onQualityChange 
-}: { 
-  qualities: string[], 
-  selectedQuality?: string, 
-  onQualityChange?: (quality: string) => void 
+function QualitySubmenu({
+  qualities,
+  selectedQuality = "auto",
+  onQualityChange,
+}: {
+  qualities: string[];
+  selectedQuality?: string;
+  onQualityChange?: (quality: string) => void;
 }) {
   return (
     <Menu.Root>
@@ -124,9 +159,9 @@ function QualitySubmenu({
           value={selectedQuality}
         >
           {qualities.map((quality) => (
-            <Radio 
-              value={quality} 
-              onSelect={() => onQualityChange?.(quality)} 
+            <Radio
+              value={quality}
+              onSelect={() => onQualityChange?.(quality)}
               key={quality}
             >
               {quality}
@@ -138,16 +173,16 @@ function QualitySubmenu({
   );
 }
 
-function PlaybackSpeedSubmenu({ 
-  playbackSpeed = 1, 
-  onPlaybackSpeedChange 
-}: { 
-  playbackSpeed?: number, 
-  onPlaybackSpeedChange?: (speed: number) => void 
+function PlaybackSpeedSubmenu({
+  playbackSpeed = 1,
+  onPlaybackSpeedChange,
+}: {
+  playbackSpeed?: number;
+  onPlaybackSpeedChange?: (speed: number) => void;
 }) {
   const speeds = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
-  const formatSpeed = (speed: number) => speed === 1 ? 'Normal' : `${speed}x`;
-  
+  const formatSpeed = (speed: number) => (speed === 1 ? "Normal" : `${speed}x`);
+
   return (
     <Menu.Root>
       <SubmenuButton
@@ -161,9 +196,9 @@ function PlaybackSpeedSubmenu({
           value={playbackSpeed.toString()}
         >
           {speeds.map((speed) => (
-            <Radio 
-              value={speed.toString()} 
-              onSelect={() => onPlaybackSpeedChange?.(speed)} 
+            <Radio
+              value={speed.toString()}
+              onSelect={() => onPlaybackSpeedChange?.(speed)}
               key={speed}
             >
               {formatSpeed(speed)}
@@ -209,9 +244,7 @@ function SubmenuButton({
       disabled={disabled}
     >
       <ChevronLeftIcon className="parent-data-[open]:block -ml-0.5 mr-1.5 hidden h-[18px] w-[18px]" />
-      <div className="contents parent-data-[open]:hidden">
-        {Icon}
-      </div>
+      <div className="contents parent-data-[open]:hidden">{Icon}</div>
       <span className="ml-1.5 parent-data-[open]:ml-0">{label}</span>
       <span className="ml-auto text-sm text-white/50">{hint}</span>
       <ChevronRightIcon className="parent-data-[open]:hidden ml-0.5 h-[18px] w-[18px] text-sm text-white/50" />

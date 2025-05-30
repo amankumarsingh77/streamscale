@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/amankumarsingh77/cloud-video-encoder/internal/models"
@@ -30,7 +31,7 @@ func (v *videoRedisRepo) EnqueueJob(ctx context.Context, key string, videoJob *m
 	}
 
 	pipe := v.redisClient.Pipeline()
-
+	log.Println(videoJob)
 	pipe.HSet(ctx, jobKey, map[string]interface{}{
 		"job_id":        videoJob.JobID,
 		"user_id":       videoJob.UserID,
@@ -128,7 +129,7 @@ func (v *videoRedisRepo) UpdateStatus(ctx context.Context, jobID string, key str
 	jobKey := fmt.Sprintf("job:%s", jobID)
 
 	pipe := v.redisClient.Pipeline()
-	pipe.HSet(ctx, jobKey, "status", status)
+	pipe.HSet(ctx, jobKey, "status", string(status))
 
 	if status == models.JobStatusCompleted || status == models.JobStatusFailed {
 		pipe.HSet(ctx, jobKey, "completed_at", time.Now().Format(time.RFC3339))

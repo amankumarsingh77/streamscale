@@ -68,6 +68,10 @@ func (u *User) PrepareCreate() error {
 		return fmt.Errorf("invalid email format ")
 	}
 
+	if u.Fullname == ""{
+		return fmt.Errorf("fullname is required")
+	}
+
 	u.Password = strings.TrimSpace(u.Password)
 	if err := u.HashPassword(); err != nil {
 		return err

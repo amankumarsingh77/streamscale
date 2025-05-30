@@ -10,6 +10,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { videoApi, VideoFile } from "@/lib/videoApi";
+import {
+  analyticsApi,
+  AnalyticsSummary as ApiAnalyticsSummary,
+  VideoPerformance,
+} from "@/lib/analyticsApi";
 import { useAuth } from "@/lib/auth";
 import {
   BarChart3,
@@ -43,11 +48,11 @@ interface AnalyticsSummary {
   totalViews: number;
   totalWatchTime: number;
   totalEngagement: number;
-  recentVideos: VideoFile[];
+  recentVideos: VideoPerformance[];
   viewsGrowth: number;
   watchTimeGrowth: number;
   engagementGrowth: number;
-  topPerformers: VideoFile[];
+  topPerformers: VideoPerformance[];
   weeklyStats: {
     views: number;
     engagement: number;
@@ -86,41 +91,104 @@ export default function DashboardAnalytics() {
   useEffect(() => {
     const fetchAnalytics = async () => {
       try {
-        const response = await videoApi.listVideos(1, 5);
+        // Fetch analytics summary from the API
+        const analyticsSummary = await analyticsApi.getAnalyticsSummary();
 
+        // Fetch top performing videos
+        const topVideos = await analyticsApi.getTopPerformingVideos(5);
+
+        // Fetch recent videos with performance metrics
+        const recentVideos = await analyticsApi.getRecentVideos(5);
+
+        // Calculate growth percentages (comparing to previous period)
+        // For demo purposes, we'll use some reasonable values
+        const viewsGrowth = 12.5;
+        const watchTimeGrowth = 8.3;
+        const engagementGrowth = -2.1;
+
+        // Calculate weekly stats (last 7 days)
+        const weeklyViews = topVideos.reduce(
+          (sum, video) => sum + video.views_last_7_days,
+          0
+        );
+        const weeklyWatchTime = topVideos.reduce(
+          (sum, video) => sum + video.watch_time_last_7_days,
+          0
+        );
+
+        // Calculate average engagement score for weekly stats
+        const weeklyEngagement =
+          topVideos.length > 0
+            ? topVideos.reduce(
+                (sum, video) => sum + video.engagement_score,
+                0
+              ) / topVideos.length
+            : 0;
+
+        // Set analytics state with real data
         setAnalytics({
-          totalVideos: response.total_count || 0,
-          totalViews: Math.floor(Math.random() * 10000),
-          totalWatchTime: Math.floor(Math.random() * 5000),
-          totalEngagement: Math.floor(Math.random() * 1000),
-          recentVideos: response.videos || [],
-          viewsGrowth: 12.5,
-          watchTimeGrowth: 8.3,
-          engagementGrowth: -2.1,
-          topPerformers: response.videos || [],
+          totalVideos: analyticsSummary.total_videos,
+          totalViews: analyticsSummary.total_views,
+          totalWatchTime: analyticsSummary.total_watch_time,
+          totalEngagement: Math.round(
+            analyticsSummary.avg_engagement_score * 10
+          ), // Scale for display
+          recentVideos: recentVideos,
+          viewsGrowth: viewsGrowth,
+          watchTimeGrowth: watchTimeGrowth,
+          engagementGrowth: engagementGrowth,
+          topPerformers: topVideos,
           weeklyStats: {
-            views: Math.floor(Math.random() * 5000),
-            engagement: Math.floor(Math.random() * 500),
-            watchTime: Math.floor(Math.random() * 2000),
+            views: weeklyViews,
+            engagement: Math.round(weeklyEngagement),
+            watchTime: weeklyWatchTime,
           },
+          // For demo purposes, we'll use some reasonable values for these metrics
+          // In a real implementation, these would come from the API
           audienceRetention: 75.8,
-          shareCount: Math.floor(Math.random() * 200),
-          likes: Math.floor(Math.random() * 1500),
+          shareCount: Math.floor(analyticsSummary.total_views * 0.02), // Assume 2% share rate
+          likes: Math.floor(analyticsSummary.total_views * 0.15), // Assume 15% like rate
         });
       } catch (error) {
         console.error("Error fetching analytics:", error);
+
+        // Fallback to fetching just the videos if analytics API fails
+        try {
+          const response = await videoApi.listVideos(1, 5);
+          setAnalytics({
+            totalVideos: response.total_count || 0,
+            totalViews: 0,
+            totalWatchTime: 0,
+            totalEngagement: 0,
+            recentVideos: [],
+            viewsGrowth: 0,
+            watchTimeGrowth: 0,
+            engagementGrowth: 0,
+            topPerformers: [],
+            weeklyStats: {
+              views: 0,
+              engagement: 0,
+              watchTime: 0,
+            },
+            audienceRetention: 0,
+            shareCount: 0,
+            likes: 0,
+          });
+        } catch (videoError) {
+          console.error("Error fetching videos:", videoError);
+        }
       } finally {
         setLoading(false);
       }
     };
 
     fetchAnalytics();
-  }, []);
+  }, [selectedTimeRange]);
 
-  const formatDuration = (minutes: number) => {
-    const hours = Math.floor(minutes / 60);
-    const remainingMinutes = minutes % 60;
-    return `${hours}h ${remainingMinutes}m`;
+  const formatDuration = (seconds: number) => {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    return `${hours}h ${minutes}m`;
   };
 
   const formatNumber = (num: number) => {
@@ -450,10 +518,10 @@ export default function DashboardAnalytics() {
                     }
                   >
                     <div className="w-24 h-14 bg-black/40 rounded-md overflow-hidden flex-shrink-0">
-                      {video.playback_info?.thumbnail ? (
+                      {video.thumbnail_url ? (
                         <img
-                          src={video.playback_info.thumbnail}
-                          alt={video.file_name}
+                          src={video.thumbnail_url}
+                          alt={video.title}
                           className="w-full h-full object-cover"
                         />
                       ) : (
@@ -464,39 +532,23 @@ export default function DashboardAnalytics() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <h3 className="text-sm font-medium text-white truncate">
-                        {video.file_name}
+                        {video.title}
                       </h3>
                       <div className="flex items-center gap-3 mt-1 text-xs text-slate-400">
                         <div className="flex items-center gap-1">
                           <Calendar className="w-3 h-3" />
                           <span>
-                            {new Date(video.uploaded_at).toLocaleDateString()}
+                            {new Date(video.created_at).toLocaleDateString()}
                           </span>
                         </div>
                         <div className="flex items-center gap-1">
                           <Eye className="w-3 h-3" />
-                          <span>
-                            {formatNumber(Math.floor(Math.random() * 1000))}{" "}
-                            views
-                          </span>
+                          <span>{formatNumber(video.total_views)} views</span>
                         </div>
                       </div>
                     </div>
-                    <div
-                      className={`
-                                        px-2 py-1 rounded-full text-xs font-medium
-                                        ${
-                                          video.status === "completed"
-                                            ? "bg-emerald-500/10 text-emerald-400"
-                                            : video.status === "processing"
-                                            ? "bg-amber-500/10 text-amber-400"
-                                            : video.status === "queued"
-                                            ? "bg-blue-500/10 text-blue-400"
-                                            : "bg-red-500/10 text-red-400"
-                                        }
-                                    `}
-                    >
-                      {video.status}
+                    <div className="px-2 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400">
+                      {formatNumber(video.engagement_score)}% engagement
                     </div>
                   </div>
                 ))}
@@ -527,22 +579,24 @@ export default function DashboardAnalytics() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <h3 className="text-sm font-medium text-white truncate">
-                        {video.file_name}
+                        {video.title}
                       </h3>
                       <div className="flex items-center gap-3 mt-1">
                         <span className="text-xs text-emerald-400 flex items-center gap-1">
                           <Eye className="w-3 h-3" />
-                          {formatNumber(Math.floor(Math.random() * 10000))}
+                          {formatNumber(video.total_views)}
                         </span>
                         <span className="text-xs text-blue-400 flex items-center gap-1">
                           <Clock className="w-3 h-3" />
-                          {formatDuration(Math.floor(Math.random() * 120))}
+                          {formatDuration(
+                            video.total_watch_time / video.total_views
+                          )}
                         </span>
                       </div>
                     </div>
                     <div className="text-sm font-medium text-emerald-400 flex items-center gap-1">
                       <ArrowUpRight className="w-4 h-4" />
-                      {Math.floor(Math.random() * 40 + 10)}%
+                      {video.engagement_score.toFixed(1)}%
                     </div>
                   </div>
                 ))}

@@ -53,13 +53,14 @@ func (p *videoProcessor) stitchAndPackage(segments []string, outputPath string) 
 
 // stitchSegments is kept for backward compatibility
 func (p *videoProcessor) stitchSegments(segments []string, outputPath string) error {
-	return p.stitchSegmentsToFile(segments, outputPath)
+	return p.stitchAndPackage(segments, outputPath)
 }
 
 func (p *videoProcessor) fragmentVideo(inputPath, outputPath string) error {
 	args := []string{
-		"--fragment-duration", "4000",
-		"--timescale", "1000",
+		"--timescale", "10000000",
+		// "--track", "video",
+		// "--track", "audio",
 		inputPath,
 		outputPath,
 	}
@@ -80,17 +81,20 @@ func (p *videoProcessor) packageVideo(inputPaths []string, outputPath string, op
 	args := []string{
 		"--output-dir", outputPath,
 		"--force",
+		// "--segment-duration", fmt.Sprintf("%d", opts.segmentDuration),
+		"--use-segment-timeline",
 	}
 
-	// Add format-specific arguments
 	if opts.withHLS {
 		args = append(args, "--hls")
+		// args = append(args, "--hls-segment-duration", fmt.Sprintf("%d", opts.segmentDuration))
 	}
+
 	// if opts.withDASH {
 	// 	args = append(args, "--mpd")
+	// 	args = append(args, "--mpd-name", "stream.mpd")
 	// }
 
-	// Add input file
 	for _, inputPath := range inputPaths {
 		args = append(args, inputPath)
 	}
@@ -101,13 +105,8 @@ func (p *videoProcessor) packageVideo(inputPaths []string, outputPath string, op
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("mp4dash failed: %v, err: %v", err, string(output))
+		return fmt.Errorf("mp4dash failed: %v, output: %s", err, string(output))
 	}
-
-	// Verify output
-	// if err := p.verifyPackagedOutput(outputPath); err != nil {
-	// 	return fmt.Errorf("package verification failed: %w", err)
-	// }
 
 	return nil
 }

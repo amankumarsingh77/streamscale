@@ -492,7 +492,7 @@ export default function VideoDetails() {
                     </p>
                   </div>
 
-                  {playbackInfo.subtitles &&
+                  {/* {playbackInfo.subtitles &&
                     playbackInfo.subtitles.length > 0 && (
                       <div>
                         <p className="text-xs font-medium text-slate-400 mb-1">
@@ -509,7 +509,7 @@ export default function VideoDetails() {
                           ))}
                         </div>
                       </div>
-                    )}
+                    )} */}
 
                   <div>
                     <p className="text-xs font-medium text-slate-400 mb-1">

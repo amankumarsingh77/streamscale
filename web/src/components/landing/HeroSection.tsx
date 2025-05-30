@@ -16,19 +16,21 @@ export default function HeroSection() {
 
   // Example video URLs - replace with actual demo videos
   const demoVideos = {
-    original: "https://download.blender.org/peach/bigbuckbunny_movies/big_buck_bunny_1080p_h264.mov", // High bitrate original
-    processed: "https://pub-c649658f12ac4ce2b225d064b9a211e8.r2.dev/compressed_video.mp4", // Lower bitrate but visually similar
+    original:
+      "https://download.blender.org/peach/bigbuckbunny_movies/big_buck_bunny_1080p_h264.mov", // High bitrate original
+    processed:
+      "https://pub-c649658f12ac4ce2b225d064b9a211e8.r2.dev/compressed_video.mp4", // Lower bitrate but visually similar
   };
 
   const handleDragStart = (e: React.MouseEvent<HTMLDivElement>) => {
     setIsDragging(true);
-    document.body.style.userSelect = 'none';
+    document.body.style.userSelect = "none";
     updateComparisonPosition(e);
   };
 
   const handleDragEnd = () => {
     setIsDragging(false);
-    document.body.style.userSelect = '';
+    document.body.style.userSelect = "";
   };
 
   const handleDragMove = (e: MouseEvent) => {
@@ -51,13 +53,13 @@ export default function HeroSection() {
     const handleMouseMove = (e: MouseEvent) => handleDragMove(e);
 
     if (isDragging) {
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', handleMouseUp);
+      window.addEventListener("mousemove", handleMouseMove);
+      window.addEventListener("mouseup", handleMouseUp);
     }
 
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
     };
   }, [isDragging]);
 
@@ -66,7 +68,7 @@ export default function HeroSection() {
       if (isPlaying) {
         Promise.all([
           originalVideoRef.current.play(),
-          processedVideoRef.current.play()
+          processedVideoRef.current.play(),
         ]).catch(console.error);
       } else {
         originalVideoRef.current.pause();
@@ -83,19 +85,21 @@ export default function HeroSection() {
     if (!originalVideo || !processedVideo) return;
 
     const syncVideos = () => {
-      if (Math.abs(originalVideo.currentTime - processedVideo.currentTime) > 0.1) {
+      if (
+        Math.abs(originalVideo.currentTime - processedVideo.currentTime) > 0.1
+      ) {
         processedVideo.currentTime = originalVideo.currentTime;
       }
     };
 
-    originalVideo.addEventListener('timeupdate', syncVideos);
-    originalVideo.addEventListener('seeking', syncVideos);
-    originalVideo.addEventListener('seeked', syncVideos);
+    originalVideo.addEventListener("timeupdate", syncVideos);
+    originalVideo.addEventListener("seeking", syncVideos);
+    originalVideo.addEventListener("seeked", syncVideos);
 
     return () => {
-      originalVideo.removeEventListener('timeupdate', syncVideos);
-      originalVideo.removeEventListener('seeking', syncVideos);
-      originalVideo.removeEventListener('seeked', syncVideos);
+      originalVideo.removeEventListener("timeupdate", syncVideos);
+      originalVideo.removeEventListener("seeking", syncVideos);
+      originalVideo.removeEventListener("seeked", syncVideos);
     };
   }, []);
 
@@ -108,19 +112,18 @@ export default function HeroSection() {
 
     const handleLoad = () => {
       if (isPlaying) {
-        Promise.all([
-          originalVideo.play(),
-          processedVideo.play()
-        ]).catch(console.error);
+        Promise.all([originalVideo.play(), processedVideo.play()]).catch(
+          console.error
+        );
       }
     };
 
-    originalVideo.addEventListener('loadedmetadata', handleLoad);
-    processedVideo.addEventListener('loadedmetadata', handleLoad);
+    originalVideo.addEventListener("loadedmetadata", handleLoad);
+    processedVideo.addEventListener("loadedmetadata", handleLoad);
 
     return () => {
-      originalVideo.removeEventListener('loadedmetadata', handleLoad);
-      processedVideo.removeEventListener('loadedmetadata', handleLoad);
+      originalVideo.removeEventListener("loadedmetadata", handleLoad);
+      processedVideo.removeEventListener("loadedmetadata", handleLoad);
     };
   }, [isPlaying]);
 
@@ -150,14 +153,16 @@ export default function HeroSection() {
               </h1>
 
               <p className="text-xl text-slate-400 max-w-2xl leading-relaxed">
-                Professional-grade video processing and streaming platform. Convert, compress, and deliver your content in stunning quality to any device, anywhere.
+                Professional-grade video processing and streaming platform.
+                Convert, compress, and deliver your content in stunning quality
+                to any device, anywhere.
               </p>
             </div>
 
             <div className="flex flex-col sm:flex-row gap-4">
               <Button
                 size="lg"
-                onClick={() => navigate('/signup')}
+                onClick={() => navigate("/login")}
                 className="bg-violet-600 hover:bg-violet-700 text-lg font-medium tracking-wide"
               >
                 Get Started Free
@@ -210,7 +215,7 @@ export default function HeroSection() {
                   className="absolute inset-0 overflow-hidden"
                   style={{
                     clipPath: `inset(0 ${Math.max(0, 100 - comparison)}% 0 0)`,
-                    willChange: 'clip-path'
+                    willChange: "clip-path",
                   }}
                 >
                   <video
@@ -232,7 +237,7 @@ export default function HeroSection() {
                   className="absolute top-0 bottom-0 flex items-center cursor-ew-resize group touch-none"
                   style={{
                     left: `${comparison}%`,
-                    transform: 'translateX(-50%)',
+                    transform: "translateX(-50%)",
                   }}
                   onMouseDown={handleDragStart}
                 >
@@ -251,17 +256,27 @@ export default function HeroSection() {
                     {/* Original Video Stats */}
                     <div className="bg-black/60 backdrop-blur-sm px-4 py-2 rounded-full border border-white/10 shadow-lg shadow-black/50">
                       <div className="flex flex-col">
-                        <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium">Original Source</span>
+                        <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium">
+                          Original Source
+                        </span>
                         <div className="flex items-center gap-3">
                           <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-medium text-white">1080P</span>
-                            <span className="text-[10px] text-slate-400">•</span>
+                            <span className="text-xs font-medium text-white">
+                              1080P
+                            </span>
+                            <span className="text-[10px] text-slate-400">
+                              •
+                            </span>
                             <span className="text-xs text-white">721MB</span>
                           </div>
                           <div className="h-3 w-[1px] bg-white/20" />
                           <div className="flex items-center gap-1">
-                            <span className="text-xs font-medium text-white">8.0</span>
-                            <span className="text-[10px] uppercase text-slate-400">Mbps</span>
+                            <span className="text-xs font-medium text-white">
+                              8.0
+                            </span>
+                            <span className="text-[10px] uppercase text-slate-400">
+                              Mbps
+                            </span>
                           </div>
                         </div>
                       </div>
@@ -270,17 +285,27 @@ export default function HeroSection() {
                     {/* Processed Video Stats */}
                     <div className="bg-black/60 backdrop-blur-sm px-4 py-2 rounded-full border border-violet-500/20 shadow-lg shadow-violet-500/20">
                       <div className="flex flex-col">
-                        <span className="text-[10px] uppercase tracking-wider text-violet-300 font-medium">Optimized Output</span>
+                        <span className="text-[10px] uppercase tracking-wider text-violet-300 font-medium">
+                          Optimized Output
+                        </span>
                         <div className="flex items-center gap-3">
                           <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-medium text-white">1080P</span>
-                            <span className="text-[10px] text-slate-400">•</span>
+                            <span className="text-xs font-medium text-white">
+                              1080P
+                            </span>
+                            <span className="text-[10px] text-slate-400">
+                              •
+                            </span>
                             <span className="text-xs text-white">142MB</span>
                           </div>
                           <div className="h-3 w-[1px] bg-white/20" />
                           <div className="flex items-center gap-1">
-                            <span className="text-xs font-medium text-white">2.0</span>
-                            <span className="text-[10px] uppercase text-slate-400">Mbps</span>
+                            <span className="text-xs font-medium text-white">
+                              2.0
+                            </span>
+                            <span className="text-[10px] uppercase text-slate-400">
+                              Mbps
+                            </span>
                           </div>
                         </div>
                       </div>
@@ -291,14 +316,22 @@ export default function HeroSection() {
                   <div className="flex gap-2">
                     <div className="bg-emerald-500/10 backdrop-blur-sm px-3 py-1.5 rounded-full border border-emerald-500/20 shadow-lg shadow-emerald-500/20">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-semibold text-emerald-400">90%</span>
-                        <span className="text-[10px] text-emerald-300">Smaller</span>
+                        <span className="text-xs font-semibold text-emerald-400">
+                          90%
+                        </span>
+                        <span className="text-[10px] text-emerald-300">
+                          Smaller
+                        </span>
                       </div>
                     </div>
                     <div className="bg-violet-500/10 backdrop-blur-sm px-3 py-1.5 rounded-full border border-violet-500/20 shadow-lg shadow-violet-500/20">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-semibold text-violet-400">1080P</span>
-                        <span className="text-[10px] text-violet-300">Quality</span>
+                        <span className="text-xs font-semibold text-violet-400">
+                          1080P
+                        </span>
+                        <span className="text-[10px] text-violet-300">
+                          Quality
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -311,4 +344,3 @@ export default function HeroSection() {
     </div>
   );
 }
-
