@@ -1,13 +1,21 @@
-import captionStyles from './captions.module.css';
-import styles from './video-layout.module.css';
+import "@vidstack/react/player/styles/default/captions.css";
+import "./captions.module.css"; // Custom enhancements
+import styles from "./video-layout.module.css";
 
-import { Captions, Controls, Gesture } from '@vidstack/react';
+import { Captions, Controls, Gesture } from "@vidstack/react";
 
-import * as Buttons from '../buttons';
-import * as Menus from '../menus';
-import * as Sliders from '../sliders';
-import { TimeGroup } from '../time-group';
-import { Title } from '../title';
+import * as Buttons from "../buttons";
+import * as Menus from "../menus";
+import * as Sliders from "../sliders";
+import { TimeGroup } from "../time-group";
+import { Title } from "../title";
+
+interface SubtitleTrack {
+  src: string;
+  label: string;
+  language: string;
+  kind: "subtitles" | "captions";
+}
 
 export interface VideoLayoutProps {
   thumbnails?: string;
@@ -18,23 +26,27 @@ export interface VideoLayoutProps {
   onPlaybackSpeedChange?: (speed: number) => void;
   qualityTooltip?: string;
   speedTooltip?: string;
+  subtitleTracks?: SubtitleTrack[];
 }
 
 export function VideoLayout({
   thumbnails,
   qualities = [],
-  selectedQuality = 'auto',
+  selectedQuality = "auto",
   onQualityChange,
   playbackSpeed = 1,
   onPlaybackSpeedChange,
   qualityTooltip,
-  speedTooltip
+  speedTooltip,
+  subtitleTracks = [],
 }: VideoLayoutProps) {
   return (
     <>
       <Gestures />
       <Captions
-        className={`${captionStyles.captions} media-preview:opacity-0 media-controls:bottom-[85px] media-captions:opacity-100 absolute inset-0 bottom-2 z-10 select-none break-words opacity-0 transition-[opacity,bottom] duration-300`}
+        className="vds-captions media-preview:opacity-0 media-controls:bottom-[85px] media-captions:opacity-100 absolute inset-0 bottom-2 z-10 select-none break-words opacity-0 transition-[opacity,bottom] duration-300"
+        onLoad={() => console.log("🎬 Captions component loaded")}
+        onError={(error) => console.error("❌ Captions error:", error)}
       />
       <Controls.Root
         className={`${styles.controls} media-controls:opacity-100 absolute inset-0 z-10 flex h-full w-full flex-col bg-gradient-to-t from-black/10 to-transparent opacity-0 transition-opacity`}
@@ -59,6 +71,7 @@ export function VideoLayout({
             onQualityChange={onQualityChange}
             playbackSpeed={playbackSpeed}
             onPlaybackSpeedChange={onPlaybackSpeedChange}
+            subtitleTracks={subtitleTracks}
           />
           <Buttons.PIP tooltipPlacement="top" />
           <Buttons.Fullscreen tooltipPlacement="top end" />
